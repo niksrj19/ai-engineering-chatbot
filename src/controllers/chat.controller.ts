@@ -18,6 +18,8 @@ export class ChatController {
 
       const { message } = req.body;
 
+      const { conversationId } = req.body;
+
       if (
         typeof message !== "string" ||
         !message.trim()
@@ -28,7 +30,7 @@ export class ChatController {
       }
 
       const result =
-        await this.chatService.chat(message);
+        await this.chatService.chat(conversationId, message);
 
       return res.json({
         data: result,

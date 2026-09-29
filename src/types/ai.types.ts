@@ -43,3 +43,15 @@ export interface LLMResponse {
 
   finishReason?: string;
 }
+
+export interface ConversationMessage {
+  id: string;
+
+  conversationId: string;
+
+  role: ChatMessageRole;
+
+  content: string;
+
+  createdAt: Date;
+}

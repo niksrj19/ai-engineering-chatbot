@@ -26,6 +26,7 @@ export class GroqAIProvider implements LLMProvider {
     const response =
       await this.client.chat.completions.create({
         model: this.model,
+        
 
         messages: request.messages.map(
           message => ({

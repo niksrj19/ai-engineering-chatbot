@@ -18,17 +18,30 @@ import { createChatRoutes } from "./routes/chat.routes.js";
 
 import { errorMiddleware } from "./middleware/error.middleware.js";
 
+import {ContextService }  from "./services/context.service.js";
+
+import { ConversationRepository } from "./repositories/conversation.repository.js";
+
+import { InMemoryConversationRepository } from "./repositories/in-memory-conversation.repository.js";
+
+const conversationRepository =
+  new InMemoryConversationRepository();
+
 const app = express();
 
 app.use(express.json());
 
-// const provider =
-//   new GroqAIProvider(
-//     env.groqApiKey,
-//     env.groqModel
-//   );
+const provider =
+  new GroqAIProvider(
+    env.groqApiKey,
+    env.groqModel
+  );
 
-const provider = new MockLLMProvider();
+// const provider = new MockLLMProvider();
+
+const contextService = new ContextService({
+  maxMessages: 10,
+});
 
 const llmService =
   new LLMService(
@@ -37,7 +50,7 @@ const llmService =
   );
 
 const chatService =
-  new ChatService(llmService);
+  new ChatService(llmService, conversationRepository, contextService);
 
 const chatController =
   new ChatController(chatService);
