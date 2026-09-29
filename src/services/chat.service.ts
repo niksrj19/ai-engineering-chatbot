@@ -33,4 +33,25 @@ export class ChatService {
       maxTokens: 500,
     });
   }
+
+  stream(message: string, signal?: AbortSignal): AsyncIterable<string> {
+
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a helpful enterprise AI assistant.",
+    },
+    {
+      role: "user",
+      content: message,
+    },
+  ];
+
+  return this.llmService.stream({
+    messages,
+    temperature: 0.2,
+    maxTokens: 500,
+  }, signal);
+}
 }

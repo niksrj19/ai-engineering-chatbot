@@ -37,6 +37,7 @@ export class GroqAIProvider implements LLMProvider {
         temperature: request.temperature,
 
         max_tokens: request.maxTokens,
+        
       });
 
     const choice = response.choices[0];
@@ -84,6 +85,8 @@ export class GroqAIProvider implements LLMProvider {
         max_tokens: request.maxTokens,
 
         stream: true,
+
+        // signal: request.signal,
       });
 
     for await (const chunk of stream) {

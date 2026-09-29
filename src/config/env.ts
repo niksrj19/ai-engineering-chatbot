@@ -18,4 +18,12 @@ export const env = {
   groqApiKey: getRequiredEnv("GROQ_API_KEY"),
 
   groqModel: getRequiredEnv("GROQ_MODEL"),
+
+  retry: {
+    maxAttempts: 3,
+
+    baseDelayMs: 500,
+
+    maxDelayMs: 5000,
+  },
 };

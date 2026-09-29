@@ -27,6 +27,7 @@ export interface LLMRequest {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
 }
 
 export interface LLMResponse {
