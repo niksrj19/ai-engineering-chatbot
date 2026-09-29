@@ -6,6 +6,8 @@ import { OpenAIProvider } from "./providers/openai.provider.js";
 
 import { GroqAIProvider } from "./providers/groqai.provider.js";
 
+import { MockLLMProvider } from "./providers/mock.provider.js";
+
 import { LLMService } from "./services/llm.service.js";
 
 import { ChatService } from "./services/chat.service.js";
@@ -20,14 +22,19 @@ const app = express();
 
 app.use(express.json());
 
-const provider =
-  new GroqAIProvider(
-    env.groqApiKey,
-    env.groqModel
-  );
+// const provider =
+//   new GroqAIProvider(
+//     env.groqApiKey,
+//     env.groqModel
+//   );
+
+const provider = new MockLLMProvider();
 
 const llmService =
-  new LLMService(provider);
+  new LLMService(
+    provider,
+    env.retry
+  );
 
 const chatService =
   new ChatService(llmService);

@@ -13,5 +13,10 @@ export function createChatRoutes(
     controller.chat
   );
 
+   router.post(
+    "/chat/stream",
+    controller.stream
+  );
+
   return router;
 }

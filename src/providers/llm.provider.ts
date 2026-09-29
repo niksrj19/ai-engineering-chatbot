@@ -5,11 +5,14 @@ import {
 
 
 export interface LLMProvider {
+
   generate(
-    request: LLMRequest
+    request: LLMRequest,
+    signal?: AbortSignal
   ): Promise<LLMResponse>;
 
   stream(
-    request: LLMRequest
+    request: LLMRequest,
+    signal?: AbortSignal
   ): AsyncIterable<string>;
 }
