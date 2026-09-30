@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import {
   LLMRequest,
   LLMResponse,
+  LLMMessage,
 } from "../types/ai.types.js";
 
 import { LLMProvider, LLMStreamEvent } from "./llm.provider.js";
@@ -28,12 +29,7 @@ export class OpenAIProvider implements LLMProvider {
       await this.client.chat.completions.create({
         model: this.model,
 
-        messages: request.messages.map(
-          message => ({
-            role: message.role,
-            content: message.content,
-          })
-        ),
+        messages: this.mapMessages(request.messages),
 
         temperature: request.temperature,
 
@@ -76,12 +72,7 @@ export class OpenAIProvider implements LLMProvider {
       await this.client.chat.completions.create({
         model: this.model,
 
-        messages: request.messages.map(
-          message => ({
-            role: message.role,
-            content: message.content,
-          })
-        ),
+        messages: this.mapMessages(request.messages),
 
         temperature: request.temperature,
 
@@ -118,5 +109,62 @@ export class OpenAIProvider implements LLMProvider {
       type: "done",
       finishReason,
     };
+  }
+
+   private mapMessages(
+    messages: LLMMessage[]
+  ) {
+    return messages.map(message => {
+      if ("toolCallId" in message) {
+        return {
+          role: "tool" as const,
+          content: message.content,
+          tool_call_id:
+            message.toolCallId,
+        };
+      }
+
+      if ("toolCalls" in message) {
+        return {
+          role: "assistant" as const,
+
+          content:
+            message.content ?? null,
+
+          tool_calls:
+            message.toolCalls.map(
+              call => ({
+                id: call.id,
+
+                type: "function" as const,
+
+                function: {
+                  name: call.name,
+                  arguments:
+                    call.arguments,
+                },
+              })
+            ),
+        };
+      }
+
+      switch (message.role) {
+        case "system":
+          return {
+            role: "system" as const,
+            content: message.content,
+          };
+        case "user":
+          return {
+            role: "user" as const,
+            content: message.content,
+          };
+        case "assistant":
+          return {
+            role: "assistant" as const,
+            content: message.content,
+          };
+      }
+    });
   }
 }

@@ -1,6 +1,18 @@
 import express from "express";
 
 import {
+  ToolRegistry,
+} from "./tools/tool.registry.js";
+
+import {
+  ToolExecutor,
+} from "./tools/tool.executor.js";
+
+import {
+  getOrderStatusTool,
+} from "./tools/tools/get-order-status.tool.js";
+
+import {
   env,
 } from "./config/env.js";
 
@@ -41,10 +53,25 @@ import {
 import {
   errorMiddleware,
 } from "./middleware/error.middleware.js";
+import { MockLLMProvider } from "./providers/mock.provider.js";
 
 const app = express();
 
 app.use(express.json());
+
+
+
+const toolRegistry =
+  new ToolRegistry();
+
+toolRegistry.register(
+  getOrderStatusTool
+);
+
+const toolExecutor =
+  new ToolExecutor(
+    toolRegistry
+  );
 
 /*
  * --------------------------------------------------
@@ -52,11 +79,13 @@ app.use(express.json());
  * --------------------------------------------------
  */
 
-const provider =
-  new GroqAIProvider(
-    env.groqApiKey,
-    env.groqModel
-  );
+const provider = new MockLLMProvider();
+
+// const provider =
+//   new GroqAIProvider(
+//     env.groqApiKey,
+//     env.groqModel
+//   );
 
 /*
  * --------------------------------------------------
@@ -121,7 +150,9 @@ const chatService =
     conversationRepository,
     contextService,
     tokenService,
-    costService
+    costService,
+    toolRegistry,
+    toolExecutor
   );
 
 /*

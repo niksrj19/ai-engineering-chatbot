@@ -49,15 +49,38 @@ export class ChatController {
         });
       }
 
-      const result =
-        await this.chatService.chat(
-          conversationId,
-          message
-        );
 
-      return res.json({
-        data: result,
-      });
+       /*
+     * Development-only authenticated
+     * context.
+     *
+     * Production:
+     * userId MUST come from the
+     * authentication middleware/session,
+     * never from a client-controlled
+     * header/body.
+     */
+       const requestContext = {
+      userId: "demo-user",
+
+      requestId:
+        crypto.randomUUID(),
+
+      conversationId,
+    };
+
+
+
+    const response =
+      await this.chatService.chat(
+        conversationId,
+        message,
+        requestContext
+      );
+
+     
+
+      return res.json(response);
 
     } catch (error) {
 
