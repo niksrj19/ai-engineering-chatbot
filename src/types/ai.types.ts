@@ -55,3 +55,9 @@ export interface ConversationMessage {
 
   createdAt: Date;
 }
+
+export interface ContextBudget {
+  maxContextTokens: number;
+  reservedOutputTokens: number;
+  safetyBufferTokens: number;
+}

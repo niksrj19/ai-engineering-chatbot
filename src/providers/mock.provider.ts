@@ -3,7 +3,10 @@ import {
   LLMResponse,
 } from "../types/ai.types.js";
 
-import { LLMProvider } from "./llm.provider.js";
+import {
+  LLMProvider,
+  LLMStreamEvent,
+} from "./llm.provider.js";
 
 export class MockLLMProvider
   implements LLMProvider {
@@ -13,14 +16,16 @@ export class MockLLMProvider
   ): Promise<LLMResponse> {
 
     return {
-      content: "This is a mocked AI nitesh response.",
+      content:
+        "This is a mocked AI response.",
 
-      model: "mock-model",
+      model:
+        "model-a",
 
       usage: {
-        inputTokens: 10,
-        outputTokens: 10,
-        totalTokens: 20,
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
       },
 
       finishReason: "stop",
@@ -29,12 +34,37 @@ export class MockLLMProvider
 
   async *stream(
     request: LLMRequest
-  ): AsyncIterable<string> {
+  ): AsyncIterable<LLMStreamEvent> {
 
-    yield "This ";
-    yield "is ";
-    yield "a ";
-    yield "mock ";
-    yield "stream.";
+    const chunks = [
+      "This ",
+      "is ",
+      "a ",
+      "mock ",
+      "stream."
+    ];
+
+    for (const chunk of chunks) {
+
+      yield {
+        type: "token",
+        content: chunk,
+      };
+    }
+
+    yield {
+    type: "usage",
+    model: "model-a",
+    usage: {
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+    },
+};
+
+    yield {
+      type: "done",
+      finishReason: "stop",
+    };
   }
 }

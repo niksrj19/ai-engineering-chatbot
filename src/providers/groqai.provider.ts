@@ -5,7 +5,7 @@ import {
   LLMResponse,
 } from "../types/ai.types.js";
 
-import { LLMProvider } from "./llm.provider.js";
+import { LLMProvider, LLMStreamEvent } from "./llm.provider.js";
 
 export class GroqAIProvider implements LLMProvider {
   private client: Groq;
@@ -20,7 +20,8 @@ export class GroqAIProvider implements LLMProvider {
   }
 
   async generate(
-    request: LLMRequest
+    request: LLMRequest,
+    signal?: AbortSignal
   ): Promise<LLMResponse> {
 
     const response =
@@ -38,6 +39,8 @@ export class GroqAIProvider implements LLMProvider {
         temperature: request.temperature,
 
         max_tokens: request.maxTokens,
+
+        // signal
         
       });
 
@@ -67,8 +70,9 @@ export class GroqAIProvider implements LLMProvider {
   }
 
   async *stream(
-    request: LLMRequest
-  ): AsyncIterable<string> {
+    request: LLMRequest,
+    signal?: AbortSignal
+  ): AsyncIterable<LLMStreamEvent> {
 
     const stream =
       await this.client.chat.completions.create({
@@ -90,13 +94,31 @@ export class GroqAIProvider implements LLMProvider {
         // signal: request.signal,
       });
 
+       let finishReason:
+      string | undefined;
+
     for await (const chunk of stream) {
       const content =
         chunk.choices[0]?.delta?.content;
 
       if (content) {
-        yield content;
+       yield {
+          type: "token",
+          content,
+        };
+      }
+
+      const chunkFinishReason =
+        chunk.choices[0]
+          ?.finish_reason;
+
+      if (chunkFinishReason) {
+        finishReason = chunkFinishReason;
       }
     }
+     yield {
+      type: "done",
+      finishReason,
+    };
   }
 }
