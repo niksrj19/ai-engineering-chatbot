@@ -12,96 +12,185 @@ export class MockLLMProvider
   implements LLMProvider {
 
   async generate(
-    request: LLMRequest
-  ): Promise<LLMResponse> {
+  request: LLMRequest
+): Promise<LLMResponse> {
 
-    const hasTool =
-      request.tools?.some(
-        tool =>
-          tool.name ===
-          "get_order_status"
-      );
+  const hasTool =
+    request.tools?.some(
+      tool =>
+        tool.name === "get_order_status"
+    ) ?? false;
 
-    const hasToolResult =
-      request.messages.some(
+  const hasToolResult =
+    request.messages.some(
+      message =>
+        message.role === "tool"
+    );
+
+  const lastUserMessage =
+    [...request.messages]
+      .reverse()
+      .find(
         message =>
-          message.role === "tool"
+          message.role === "user"
       );
 
-    /*
-     * First LLM turn:
-     * Ask for a tool.
-     */
-    if (
-      hasTool &&
-      !hasToolResult
-    ) {
-      return {
-        content: "",
+  const userMessage =
+    lastUserMessage?.content
+      ?.toLowerCase() ?? "";
 
-        model: "model-a",
+  const isOrderRequest =
+    userMessage.includes("order");
 
-        finishReason:
-          "tool_calls",
-
-        toolCalls: [
-          {
-            id: "call-order-status-1",
-
-            name:
-              "get_order_status",
-
-            arguments:
-              JSON.stringify({
-                orderId: "12345",
-              }),
-          },
-        ],
-
-        usage: {
-          inputTokens: 100,
-          outputTokens: 20,
-          totalTokens: 120,
-        },
-      };
+  /*
+   * Debug information
+   */
+  console.log(
+    "Mock Provider:",
+    {
+      userMessage,
+      hasTool,
+      hasToolResult,
+      outputSchema:
+        request.outputSchema?.name,
+      isOrderRequest,
     }
+  );
 
-    /*
-     * Second LLM turn:
-     * Tool result is available.
-     */
-    if (hasToolResult) {
-      return {
-        content:
-          "Your order 12345 is out for delivery and should arrive in about 30 minutes.",
+  /*
+   * --------------------------------------------------
+   * 1. First LLM turn
+   *
+   * Only request the order tool when the user
+   * actually asks about an order.
+   * --------------------------------------------------
+   */
 
-        model: "model-a",
-
-        finishReason: "stop",
-
-        usage: {
-          inputTokens: 180,
-          outputTokens: 30,
-          totalTokens: 210,
-        },
-      };
-    }
-
+  if (
+    hasTool &&
+    isOrderRequest &&
+    !hasToolResult
+  ) {
     return {
-      content:
-        "This is a mocked AI response.",
+      content: "",
 
       model: "model-a",
 
-      finishReason: "stop",
+      finishReason:
+        "tool_calls",
+
+      toolCalls: [
+        {
+          id:
+            "call-order-status-1",
+
+          name:
+            "get_order_status",
+
+          arguments:
+            JSON.stringify({
+              orderId: "12345",
+            }),
+        },
+      ],
 
       usage: {
-        inputTokens: 50,
+        inputTokens: 100,
         outputTokens: 20,
-        totalTokens: 70,
+        totalTokens: 120,
       },
     };
   }
+
+  /*
+   * --------------------------------------------------
+   * 2. Structured order response
+   *
+   * Only return JSON when ChatService explicitly
+   * requests the order_response schema.
+   * --------------------------------------------------
+   */
+
+  if (
+    request.outputSchema?.name ===
+      "order_response" &&
+    hasToolResult
+  ) {
+    return {
+      content:
+        JSON.stringify({
+          orderId:
+            "12345",
+
+          status:
+            "OUT_FOR_DELIVERY",
+
+          estimatedMinutes:
+            30,
+        }),
+
+      model:
+        "model-a",
+
+      finishReason:
+        "stop",
+
+      usage: {
+        inputTokens: 180,
+        outputTokens: 40,
+        totalTokens: 220,
+      },
+    };
+  }
+
+  /*
+   * --------------------------------------------------
+   * 3. Normal response after tool
+   * --------------------------------------------------
+   */
+
+  if (hasToolResult) {
+    return {
+      content:
+        "Your order 12345 is out for delivery and should arrive in about 30 minutes.",
+
+      model:
+        "model-a",
+
+      finishReason:
+        "stop",
+
+      usage: {
+        inputTokens: 180,
+        outputTokens: 30,
+        totalTokens: 210,
+      },
+    };
+  }
+
+  /*
+   * --------------------------------------------------
+   * 4. Normal conversation
+   * --------------------------------------------------
+   */
+
+  return {
+    content:
+      "This is a mocked AI response.",
+
+    model:
+      "model-a",
+
+    finishReason:
+      "stop",
+
+    usage: {
+      inputTokens: 50,
+      outputTokens: 20,
+      totalTokens: 70,
+    },
+  };
+}
 
   async *stream(
     request: LLMRequest
