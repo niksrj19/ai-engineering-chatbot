@@ -70,9 +70,10 @@ export interface LLMRequest {
   maxTokens?: number;
   signal?: AbortSignal;
   tools?: LLMTool[];
+  outputSchema?: LLMOutputSchema;
 }
 
-export interface LLMResponse {
+export interface LLMResponse<T = unknown> {
   content: string;
 
   usage?: {
@@ -86,6 +87,8 @@ export interface LLMResponse {
   finishReason?: string;
 
   toolCalls?: LLMToolCall[];
+
+  structuredOutput?: T;
 }
 
 export interface ConversationMessage {
@@ -104,4 +107,13 @@ export interface ContextBudget {
   maxContextTokens: number;
   reservedOutputTokens: number;
   safetyBufferTokens: number;
+}
+
+
+export interface LLMOutputSchema {
+  name: string;
+
+  description?: string;
+
+  schema: Record<string, unknown>;
 }

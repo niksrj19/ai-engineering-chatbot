@@ -54,6 +54,9 @@ import {
   errorMiddleware,
 } from "./middleware/error.middleware.js";
 import { MockLLMProvider } from "./providers/mock.provider.js";
+import { ToolAuthorizationService } from "./tools/tool.authorization.js";
+import { OrderResponseValidator } from "./services/order-response.validator.js";
+import { StructuredOutputService } from "./services/structured-output.service.js";
 
 const app = express();
 
@@ -68,9 +71,13 @@ toolRegistry.register(
   getOrderStatusTool
 );
 
+const toolAuthorization =
+  new ToolAuthorizationService();
+
+
 const toolExecutor =
   new ToolExecutor(
-    toolRegistry
+    toolRegistry , toolAuthorization
   );
 
 /*
@@ -138,6 +145,13 @@ const contextService =
 const costService =
   new CostService();
 
+
+const structuredOutputService =
+  new StructuredOutputService();
+
+  const orderResponseValidator =
+  new OrderResponseValidator();
+
 /*
  * --------------------------------------------------
  * Chat Service
@@ -152,7 +166,9 @@ const chatService =
     tokenService,
     costService,
     toolRegistry,
-    toolExecutor
+    toolExecutor,
+    structuredOutputService,
+    orderResponseValidator
   );
 
 /*

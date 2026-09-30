@@ -42,6 +42,9 @@ import {
 import {
   modelPricing,
 } from "../config/model-pricing.js";
+import { StructuredOutputService } from "./structured-output.service.js";
+import { OrderResponseValidator } from "./order-response.validator.js";
+import { OrderResponseSchema } from "../schemas/order-response.schema.js";
 
 export class ChatService {
 
@@ -67,7 +70,11 @@ export class ChatService {
       ToolRegistry,
 
     private readonly toolExecutor:
-      ToolExecutor
+      ToolExecutor,
+
+      private readonly structuredOutputService: StructuredOutputService,
+
+private readonly orderResponseValidator: OrderResponseValidator,
   ) {}
 
   async chat(
@@ -210,6 +217,48 @@ Use the tool result as the source of truth.`,
             tool.parameters,
         }));
 
+    const isOrderRequest =
+  message
+    .toLowerCase()
+    .includes("order");
+
+  const outputSchema =
+  isOrderRequest
+    ? {
+        name: "order_response",
+
+        description:
+          "Structured response containing order information.",
+
+        schema: {
+          type: "object",
+
+          properties: {
+            orderId: {
+              type: "string",
+            },
+
+            status: {
+              type: "string",
+            },
+
+            estimatedMinutes: {
+              type: "integer",
+            },
+          },
+
+          required: [
+            "orderId",
+            "status",
+            "estimatedMinutes",
+          ],
+
+          additionalProperties:
+            false,
+        },
+      }
+    : undefined;
+
  /*
      * 6. Track total usage across
      *    every LLM call.
@@ -252,6 +301,8 @@ Use the tool result as the source of truth.`,
           maxTokens: 4000,
 
           tools,
+
+          outputSchema
         });
 
       /*
@@ -273,7 +324,6 @@ Use the tool result as the source of truth.`,
         response.toolCalls.length === 0
       ) {
         finalResponse = response;
-
         break;
       }
 
@@ -387,6 +437,26 @@ Use the tool result as the source of truth.`,
       );
     }
 
+    let validatedResponse:
+  | ReturnType<
+      OrderResponseValidator["validate"]
+    >
+  | undefined;
+
+if (isOrderRequest) {
+
+  const structuredResponse =
+    this.structuredOutputService.parse(
+      finalResponse.content,
+      OrderResponseSchema
+    );
+
+  validatedResponse =
+    this.orderResponseValidator.validate(
+      structuredResponse
+    );
+}
+
     // const response =
     //   await this.llmService.generate({
     //     messages: context,
@@ -497,6 +567,9 @@ Use the tool result as the source of truth.`,
 
     return {
       ...finalResponse,
+
+      structuredOutput:
+    validatedResponse,
 
       usage: totalUsage,
     };

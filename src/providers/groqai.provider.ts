@@ -13,7 +13,7 @@ export class GroqAIProvider implements LLMProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly model: string
+    private readonly model: string,
   ) {
     this.client = new Groq({
       apiKey: this.apiKey,
