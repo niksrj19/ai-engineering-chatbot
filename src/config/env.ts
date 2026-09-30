@@ -26,4 +26,9 @@ export const env = {
 
     maxDelayMs: 5000,
   },
+  tokenBudget: {
+    maxContextTokens: 16000,
+    reservedOutputTokens: 4000,
+    safetyBufferTokens: 1000,
+  },
 };

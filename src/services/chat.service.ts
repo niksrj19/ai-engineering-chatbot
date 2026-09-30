@@ -1,88 +1,256 @@
-import { LLMService } from "./llm.service.js";
+import crypto from "node:crypto";
 
 import {
   ChatMessage,
   ConversationMessage,
   LLMResponse,
 } from "../types/ai.types.js";
-import { ContextService } from "./context.service.js";
-import { ConversationRepository } from "../repositories/conversation.repository.js";
+
+import {
+  ConversationRepository,
+} from "../repositories/conversation.repository.js";
+
+import {
+  ContextService,
+} from "./context.service.js";
+
+import {
+  TokenService,
+} from "./token.service.js";
+
+import {
+  CostService,
+} from "./cost.service.js";
+
+import {
+  LLMService,
+} from "./llm.service.js";
+
+import {
+  modelPricing,
+} from "../config/model-pricing.js";
 
 export class ChatService {
 
   constructor(
-    private readonly llmService: LLMService,
+    private readonly llmService:
+      LLMService,
 
     private readonly conversationRepository:
       ConversationRepository,
 
     private readonly contextService:
-      ContextService
+      ContextService,
+
+    private readonly tokenService:
+      TokenService,
+
+    private readonly costService:
+      CostService
   ) {}
 
- async chat(
-  conversationId: string,
-  message: string
-): Promise<LLMResponse> {
+  async chat(
+    conversationId: string,
+    message: string
+  ): Promise<LLMResponse> {
 
-  const history =
+    /*
+     * --------------------------------------------------
+     * 1. Load existing conversation history
+     * --------------------------------------------------
+     */
+
+    const history =
+      await this.conversationRepository
+        .getMessages(
+          conversationId
+        );
+
+    /*
+     * --------------------------------------------------
+     * 2. Create user message
+     * --------------------------------------------------
+     */
+
+    const userMessage:
+      ConversationMessage = {
+
+      id:
+        crypto.randomUUID(),
+
+      conversationId,
+
+      role: "user",
+
+      content: message,
+
+      createdAt: new Date(),
+    };
+
+    /*
+     * --------------------------------------------------
+     * 3. Persist user message
+     * --------------------------------------------------
+     */
+
     await this.conversationRepository
-      .getMessages(conversationId);
+      .addMessage(
+        userMessage
+      );
 
-  console.log({history, conversationId, message});
+    /*
+     * --------------------------------------------------
+     * 4. Build updated history
+     *
+     * Existing history + current user message
+     * --------------------------------------------------
+     */
 
-  const userMessage: ConversationMessage = {
-    id: crypto.randomUUID(),
+    const updatedHistory = [
+      ...history,
+      userMessage,
+    ];
 
-    conversationId,
+    /*
+     * --------------------------------------------------
+     * 5. Build token-aware context
+     * --------------------------------------------------
+     */
 
-    role: "user",
+    const context =
+      this.contextService
+        .buildContext(
+          updatedHistory
+        );
 
-    content: message,
+    /*
+     * --------------------------------------------------
+     * 6. Estimate token usage
+     *
+     * This is only a preflight estimate.
+     * --------------------------------------------------
+     */
 
-    createdAt: new Date(),
-  };
+    const maxOutputTokens = 4000;
 
-  await this.conversationRepository
-    .addMessage(userMessage);
+    const estimatedUsage =
+      this.tokenService
+        .estimateRequest(
+          context,
+          maxOutputTokens
+        );
 
-  const updatedHistory = [
-    ...history,
-    userMessage,
-  ];
+    console.log(
+      "Estimated token usage:",
+      estimatedUsage
+    );
 
-  const context =
-    this.contextService
-      .buildContext(updatedHistory);
+    /*
+     * --------------------------------------------------
+     * 7. Call LLM
+     * --------------------------------------------------
+     */
 
-  console.log({context, updatedHistory, conversationId, message});
+    const response =
+      await this.llmService.generate({
+        messages: context,
 
-  const response =
-    await this.llmService.generate({
-      messages: context,
-      temperature: 0.2,
-      maxTokens: 500,
-    });
+        temperature: 0.2,
 
-  const assistantMessage:
-    ConversationMessage = {
+        maxTokens:
+          maxOutputTokens,
+      });
 
-    id: crypto.randomUUID(),
+    /*
+     * --------------------------------------------------
+     * 8. Calculate actual cost
+     *
+     * Provider usage is authoritative.
+     * --------------------------------------------------
+     */
 
-    conversationId,
+    if (response.usage) {
 
-    role: "assistant",
+      const pricing =
+        modelPricing[
+          response.model
+        ];
 
-    content: response.content,
+      if (pricing) {
 
-    createdAt: new Date(),
-  };
+        const cost =
+          this.costService.calculate(
+            {
+              inputTokens:
+                response.usage
+                  .inputTokens,
 
-  await this.conversationRepository
-    .addMessage(assistantMessage);
+              outputTokens:
+                response.usage
+                  .outputTokens,
+            },
 
-  return response;
-}
+            pricing
+          );
+
+        console.log(
+          "Actual token usage:",
+          response.usage
+        );
+
+        console.log(
+          "Actual AI cost:",
+          cost
+        );
+      } else {
+
+        console.warn(
+          `No pricing configured for model: ${response.model}`
+        );
+      }
+    }
+
+    /*
+     * --------------------------------------------------
+     * 9. Create assistant message
+     * --------------------------------------------------
+     */
+
+    const assistantMessage:
+      ConversationMessage = {
+
+      id:
+        crypto.randomUUID(),
+
+      conversationId,
+
+      role: "assistant",
+
+      content:
+        response.content,
+
+      createdAt: new Date(),
+    };
+
+    /*
+     * --------------------------------------------------
+     * 10. Persist assistant response
+     * --------------------------------------------------
+     */
+
+    await this.conversationRepository
+      .addMessage(
+        assistantMessage
+      );
+
+    /*
+     * --------------------------------------------------
+     * 11. Return LLM response
+     * --------------------------------------------------
+     */
+
+    return response;
+  }
 
   stream(message: string, signal?: AbortSignal): AsyncIterable<string> {
 

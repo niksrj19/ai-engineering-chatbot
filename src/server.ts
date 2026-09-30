@@ -1,35 +1,56 @@
 import express from "express";
 
-import { env } from "./config/env.js";
-
-import { OpenAIProvider } from "./providers/openai.provider.js";
+import {
+  env,
+} from "./config/env.js";
 
 import { GroqAIProvider } from "./providers/groqai.provider.js";
 
-import { MockLLMProvider } from "./providers/mock.provider.js";
+import {
+  LLMService,
+} from "./services/llm.service.js";
 
-import { LLMService } from "./services/llm.service.js";
+import {
+  ChatService,
+} from "./services/chat.service.js";
 
-import { ChatService } from "./services/chat.service.js";
+import {
+  ContextService,
+} from "./services/context.service.js";
 
-import { ChatController } from "./controllers/chat.controller.js";
+import {
+  TokenService,
+} from "./services/token.service.js";
 
-import { createChatRoutes } from "./routes/chat.routes.js";
+import {
+  CostService,
+} from "./services/cost.service.js";
 
-import { errorMiddleware } from "./middleware/error.middleware.js";
+import {
+  InMemoryConversationRepository,
+} from "./repositories/in-memory-conversation.repository.js";
 
-import {ContextService }  from "./services/context.service.js";
+import {
+  ChatController,
+} from "./controllers/chat.controller.js";
 
-import { ConversationRepository } from "./repositories/conversation.repository.js";
+import {
+  createChatRoutes,
+} from "./routes/chat.routes.js";
 
-import { InMemoryConversationRepository } from "./repositories/in-memory-conversation.repository.js";
-
-const conversationRepository =
-  new InMemoryConversationRepository();
+import {
+  errorMiddleware,
+} from "./middleware/error.middleware.js";
 
 const app = express();
 
 app.use(express.json());
+
+/*
+ * --------------------------------------------------
+ * Provider
+ * --------------------------------------------------
+ */
 
 const provider =
   new GroqAIProvider(
@@ -37,11 +58,11 @@ const provider =
     env.groqModel
   );
 
-// const provider = new MockLLMProvider();
-
-const contextService = new ContextService({
-  maxMessages: 10,
-});
+/*
+ * --------------------------------------------------
+ * LLM Service
+ * --------------------------------------------------
+ */
 
 const llmService =
   new LLMService(
@@ -49,21 +70,99 @@ const llmService =
     env.retry
   );
 
+/*
+ * --------------------------------------------------
+ * Repository
+ * --------------------------------------------------
+ */
+
+const conversationRepository =
+  new InMemoryConversationRepository();
+
+/*
+ * --------------------------------------------------
+ * Token Service
+ * --------------------------------------------------
+ */
+
+const tokenService =
+  new TokenService();
+
+/*
+ * --------------------------------------------------
+ * Context Service
+ * --------------------------------------------------
+ */
+
+const contextService =
+  new ContextService(
+    env.tokenBudget,
+    tokenService
+  );
+
+/*
+ * --------------------------------------------------
+ * Cost Service
+ * --------------------------------------------------
+ */
+
+const costService =
+  new CostService();
+
+/*
+ * --------------------------------------------------
+ * Chat Service
+ * --------------------------------------------------
+ */
+
 const chatService =
-  new ChatService(llmService, conversationRepository, contextService);
+  new ChatService(
+    llmService,
+    conversationRepository,
+    contextService,
+    tokenService,
+    costService
+  );
+
+/*
+ * --------------------------------------------------
+ * Controller
+ * --------------------------------------------------
+ */
 
 const chatController =
-  new ChatController(chatService);
+  new ChatController(
+    chatService
+  );
+
+/*
+ * --------------------------------------------------
+ * Routes
+ * --------------------------------------------------
+ */
 
 app.use(
   "/api",
-  createChatRoutes(chatController)
+  createChatRoutes(
+    chatController
+  )
 );
 
-app.use(errorMiddleware);
+/*
+ * --------------------------------------------------
+ * Error Middleware
+ * --------------------------------------------------
+ */
 
-app.listen(env.port, () => {
-  console.log(
-    `AI server running on port ${env.port}`
-  );
-});
+app.use(
+  errorMiddleware
+);
+
+app.listen(
+  env.port,
+  () => {
+    console.log(
+      `AI server running on port ${env.port}`
+    );
+  }
+);

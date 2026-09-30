@@ -1,11 +1,18 @@
-import { Request, Response, NextFunction } from "express";
+import {
+  Request,
+  Response,
+  NextFunction,
+} from "express";
 
-import { ChatService } from "../services/chat.service.js";
+import {
+  ChatService,
+} from "../services/chat.service.js";
 
 export class ChatController {
 
   constructor(
-    private readonly chatService: ChatService
+    private readonly chatService:
+      ChatService
   ) {}
 
   chat = async (
@@ -16,21 +23,37 @@ export class ChatController {
 
     try {
 
-      const { message } = req.body;
+      const {
+        conversationId,
+        message,
+      } = req.body;
 
-      const { conversationId } = req.body;
+      if (
+        typeof conversationId !==
+          "string" ||
+        !conversationId.trim()
+      ) {
+        return res.status(400).json({
+          error:
+            "conversationId is required",
+        });
+      }
 
       if (
         typeof message !== "string" ||
         !message.trim()
       ) {
         return res.status(400).json({
-          error: "message is required",
+          error:
+            "message is required",
         });
       }
 
       const result =
-        await this.chatService.chat(conversationId, message);
+        await this.chatService.chat(
+          conversationId,
+          message
+        );
 
       return res.json({
         data: result,
@@ -42,7 +65,7 @@ export class ChatController {
     }
   };
 
-  stream = async (
+   stream = async (
   req: Request,
   res: Response,
   next: NextFunction
