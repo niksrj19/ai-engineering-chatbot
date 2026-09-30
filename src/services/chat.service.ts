@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import {
   ChatMessage,
+  LLMMessage,
   ConversationMessage,
   LLMResponse,
 } from "../types/ai.types.js";
@@ -19,6 +20,18 @@ import {
 } from "./token.service.js";
 
 import {
+  ToolExecutor,
+} from "../tools/tool.executor.js";
+
+import {
+  ToolRegistry,
+} from "../tools/tool.registry.js";
+
+import {
+  ToolContext,
+} from "../tools/tool.types.js";
+
+import {
   CostService,
 } from "./cost.service.js";
 
@@ -31,6 +44,8 @@ import {
 } from "../config/model-pricing.js";
 
 export class ChatService {
+
+  private readonly maxToolRounds = 5;
 
   constructor(
     private readonly llmService:
@@ -46,12 +61,19 @@ export class ChatService {
       TokenService,
 
     private readonly costService:
-      CostService
+      CostService,
+
+    private readonly toolRegistry:
+      ToolRegistry,
+
+    private readonly toolExecutor:
+      ToolExecutor
   ) {}
 
   async chat(
     conversationId: string,
-    message: string
+    message: string,
+    requestContext: ToolContext
   ): Promise<LLMResponse> {
 
     /*
@@ -123,6 +145,28 @@ export class ChatService {
           updatedHistory
         );
 
+
+
+      /*
+     * 4. Add system instructions
+     */
+    const messages: LLMMessage[] = [
+      {
+        role: "system",
+
+        content:
+          `You are a helpful enterprise AI assistant.
+
+You can use available tools when necessary.
+
+Never invent tool results.
+
+Use the tool result as the source of truth.`,
+      },
+
+      ...context,
+    ];
+
     /*
      * --------------------------------------------------
      * 6. Estimate token usage
@@ -130,6 +174,8 @@ export class ChatService {
      * This is only a preflight estimate.
      * --------------------------------------------------
      */
+
+
 
     const maxOutputTokens = 4000;
 
@@ -145,21 +191,211 @@ export class ChatService {
       estimatedUsage
     );
 
+
+
+    /*
+     * 5. Convert registered tools
+     *    into LLM tool definitions.
+     */
+    const tools =
+      this.toolRegistry
+        .getAll()
+        .map(tool => ({
+          name: tool.name,
+
+          description:
+            tool.description,
+
+          parameters:
+            tool.parameters,
+        }));
+
+ /*
+     * 6. Track total usage across
+     *    every LLM call.
+     */
+    const totalUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    };
+
+     let finalResponse:
+      LLMResponse | undefined;
+
     /*
      * --------------------------------------------------
      * 7. Call LLM
      * --------------------------------------------------
      */
 
-    const response =
-      await this.llmService.generate({
-        messages: context,
 
-        temperature: 0.2,
+      /*
+     * 7. Tool loop
+     */
+    for (
+      let round = 1;
+      round <= this.maxToolRounds;
+      round++
+    ) {
 
-        maxTokens:
-          maxOutputTokens,
+      console.log(
+        `LLM execution round: ${round}`
+      );
+
+      const response =
+        await this.llmService.generate({
+          messages,
+
+          temperature: 0.2,
+
+          maxTokens: 4000,
+
+          tools,
+        });
+
+      /*
+       * Accumulate usage from
+       * every LLM invocation.
+       */
+      this.accumulateUsage(
+        totalUsage,
+        response
+      );
+
+      /*
+       * 8. No tool call
+       *
+       * This is the final answer.
+       */
+      if (
+        !response.toolCalls ||
+        response.toolCalls.length === 0
+      ) {
+        finalResponse = response;
+
+        break;
+      }
+
+      /*
+       * 9. Add assistant tool-call
+       *    message to context.
+       */
+      messages.push({
+        role: "assistant",
+
+        content:
+          response.content || null,
+
+        toolCalls:
+          response.toolCalls,
       });
+
+      /*
+       * 10. Execute each requested tool.
+       */
+      for (
+        const toolCall
+        of response.toolCalls
+      ) {
+
+        console.log(
+          `Executing tool: ${toolCall.name}`
+        );
+
+        let args:
+          Record<string, unknown>;
+
+        /*
+         * Tool arguments come from
+         * the LLM and are untrusted.
+         */
+        try {
+          const parsed =
+            JSON.parse(
+              toolCall.arguments
+            );
+
+          if (
+            !parsed ||
+            typeof parsed !== "object" ||
+            Array.isArray(parsed)
+          ) {
+            throw new Error(
+              "Tool arguments must be an object"
+            );
+          }
+
+          args =
+            parsed as Record<
+              string,
+              unknown
+            >;
+
+        } catch {
+          messages.push({
+            role: "tool",
+
+            toolCallId:
+              toolCall.id,
+
+            content:
+              JSON.stringify({
+                success: false,
+
+                error:
+                  "Invalid tool arguments",
+              }),
+          });
+
+          continue;
+        }
+
+        /*
+         * 11. Execute through our
+         *     controlled ToolExecutor.
+         */
+        const result =
+          await this.toolExecutor.execute(
+            toolCall.name,
+
+            args,
+
+            requestContext
+          );
+
+        /*
+         * 12. Feed tool result
+         *     back to the LLM.
+         */
+        messages.push({
+          role: "tool",
+
+          toolCallId:
+            toolCall.id,
+
+          content:
+            JSON.stringify(result),
+        });
+      }
+      
+    }
+    
+    if (!finalResponse) {
+      throw new Error(
+        "Maximum tool execution rounds exceeded"
+      );
+    }
+
+    // const response =
+    //   await this.llmService.generate({
+    //     messages: context,
+
+    //     temperature: 0.2,
+
+    //     maxTokens:
+    //       maxOutputTokens,
+    //   });
 
     /*
      * --------------------------------------------------
@@ -169,52 +405,62 @@ export class ChatService {
      * --------------------------------------------------
      */
 
-    if (response.usage) {
+    // if (response.usage) {
 
-      const pricing =
-        modelPricing[
-          response.model
-        ];
+    //   const pricing =
+    //     modelPricing[
+    //       response.model
+    //     ];
 
-      if (pricing) {
+    //   if (pricing) {
 
-        const cost =
-          this.costService.calculate(
-            {
-              inputTokens:
-                response.usage
-                  .inputTokens,
+    //     const cost =
+    //       this.costService.calculate(
+    //         {
+    //           inputTokens:
+    //             response.usage
+    //               .inputTokens,
 
-              outputTokens:
-                response.usage
-                  .outputTokens,
-            },
+    //           outputTokens:
+    //             response.usage
+    //               .outputTokens,
+    //         },
 
-            pricing
-          );
+    //         pricing
+    //       );
 
-        console.log(
-          "Actual token usage:",
-          response.usage
-        );
+    //     console.log(
+    //       "Actual token usage:",
+    //       response.usage
+    //     );
 
-        console.log(
-          "Actual AI cost:",
-          cost
-        );
-      } else {
+    //     console.log(
+    //       "Actual AI cost:",
+    //       cost
+    //     );
+    //   } else {
 
-        console.warn(
-          `No pricing configured for model: ${response.model}`
-        );
-      }
-    }
+    //     console.warn(
+    //       `No pricing configured for model: ${response.model}`
+    //     );
+    //   }
+    // }
+
+    
+
+
+    this.logCost(
+      finalResponse.model,
+      totalUsage
+    );
 
     /*
      * --------------------------------------------------
      * 9. Create assistant message
      * --------------------------------------------------
      */
+
+    
 
     const assistantMessage:
       ConversationMessage = {
@@ -227,7 +473,7 @@ export class ChatService {
       role: "assistant",
 
       content:
-        response.content,
+        finalResponse.content,
 
       createdAt: new Date(),
     };
@@ -249,7 +495,70 @@ export class ChatService {
      * --------------------------------------------------
      */
 
-    return response;
+    return {
+      ...finalResponse,
+
+      usage: totalUsage,
+    };
+  }
+
+    private accumulateUsage(
+    total: {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+    },
+    response: LLMResponse
+  ): void {
+
+    if (!response.usage) {
+      return;
+    }
+
+    total.inputTokens +=
+      response.usage.inputTokens;
+
+    total.outputTokens +=
+      response.usage.outputTokens;
+
+    total.totalTokens +=
+      response.usage.totalTokens;
+  }
+
+  private logCost(
+    model: string,
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+    }
+  ): void {
+
+    const pricing =
+      modelPricing[model];
+
+    if (!pricing) {
+      console.warn(
+        `No pricing configured for ${model}`
+      );
+
+      return;
+    }
+
+    const cost =
+      this.costService.calculate(
+        usage,
+        pricing
+      );
+
+    console.log(
+      "Total AI usage:",
+      usage
+    );
+
+    console.log(
+      "Total AI cost:",
+      cost
+    );
   }
 
   async *stream(

@@ -23,11 +23,53 @@ export type ChatMessageRole =
   content: string;
 }
 
+
+export interface LLMTool {
+  name: string;
+  description: string;
+
+  parameters: {
+    type: "object";
+
+    properties: Record<
+      string,
+      {
+        type: string;
+        description: string;
+        enum?: string[];
+      }
+    >;
+
+    required?: string[];
+  };
+}
+
+export interface LLMToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ToolCallMessage {
+  role: "assistant";
+  content: string | null;
+  toolCalls: LLMToolCall[];
+}
+
+export interface ToolResultMessage {
+  role: "tool";
+  content: string;
+  toolCallId: string;
+}
+
+export type LLMMessage = ChatMessage | ToolCallMessage | ToolResultMessage;
+
 export interface LLMRequest {
-  messages: ChatMessage[];
+  messages: LLMMessage[];
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  tools?: LLMTool[];
 }
 
 export interface LLMResponse {
@@ -42,6 +84,8 @@ export interface LLMResponse {
   model: string;
 
   finishReason?: string;
+
+  toolCalls?: LLMToolCall[];
 }
 
 export interface ConversationMessage {
