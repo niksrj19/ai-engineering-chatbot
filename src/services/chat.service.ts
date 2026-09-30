@@ -252,24 +252,235 @@ export class ChatService {
     return response;
   }
 
-  stream(message: string, signal?: AbortSignal): AsyncIterable<string> {
+  async *stream(
+  conversationId: string,
+  message: string,
+  signal?: AbortSignal
+): AsyncIterable<
+  | {
+      type: "token";
+      content: string;
+    }
+  | {
+      type: "usage";
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        totalTokens: number;
+      };
+      cost?: {
+        inputCost: number;
+        outputCost: number;
+        totalCost: number;
+      };
+    }
+  | {
+      type: "done";
+      finishReason?: string;
+    }
+> {
 
-  const messages: ChatMessage[] = [
-    {
-      role: "system",
-      content:
-        "You are a helpful enterprise AI assistant.",
-    },
-    {
-      role: "user",
-      content: message,
-    },
+  /*
+   * 1. Load conversation
+   */
+
+  const history =
+    await this.conversationRepository
+      .getMessages(
+        conversationId
+      );
+
+  /*
+   * 2. Create user message
+   */
+
+  const userMessage:
+    ConversationMessage = {
+
+    id:
+      crypto.randomUUID(),
+
+    conversationId,
+
+    role: "user",
+
+    content: message,
+
+    createdAt: new Date(),
+  };
+
+  /*
+   * 3. Persist user message
+   */
+
+  await this.conversationRepository
+    .addMessage(
+      userMessage
+    );
+
+  /*
+   * 4. Build complete history
+   */
+
+  const updatedHistory = [
+    ...history,
+    userMessage,
   ];
 
-  return this.llmService.stream({
-    messages,
-    temperature: 0.2,
-    maxTokens: 500,
-  }, signal);
+  /*
+   * 5. Build token-aware context
+   */
+
+  const context =
+    this.contextService
+      .buildContext(
+        updatedHistory
+      );
+
+  /*
+   * 6. Preflight token estimate
+   */
+
+  const maxOutputTokens = 4000;
+
+  const estimatedUsage =
+    this.tokenService
+      .estimateRequest(
+        context,
+        maxOutputTokens
+      );
+
+  console.log(
+    "Estimated streaming usage:",
+    estimatedUsage
+  );
+
+  /*
+   * 7. Start LLM stream
+   */
+
+  const stream =
+    this.llmService.stream(
+      {
+        messages: context,
+        temperature: 0.2,
+        maxTokens: maxOutputTokens,
+      },
+      signal
+    );
+
+  /*
+   * 8. Accumulate assistant response
+   */
+
+  let assistantContent = "";
+
+  for await (
+    const event of stream
+  ) {
+
+    if (
+      signal?.aborted
+    ) {
+      return;
+    }
+
+    /*
+     * Token event
+     */
+
+    if (
+      event.type === "token"
+    ) {
+
+      assistantContent +=
+        event.content;
+
+      yield event;
+
+      continue;
+    }
+
+    /*
+     * Usage event
+     */
+
+   if (event.type === "usage") {
+
+  const pricing =
+    modelPricing[
+      event.model
+    ];
+
+  let cost;
+
+  if (pricing) {
+
+    cost =
+      this.costService.calculate(
+        {
+          inputTokens:
+            event.usage.inputTokens,
+
+          outputTokens:
+            event.usage.outputTokens,
+        },
+        pricing
+      );
+  }
+
+  yield {
+    type: "usage",
+
+    usage: event.usage,
+
+    cost,
+  };
+
+  continue;
+}
+
+    /*
+     * Done event
+     */
+
+    if (
+      event.type === "done"
+    ) {
+
+      /*
+       * Persist assistant message
+       * only after the stream completed.
+       */
+
+      if (
+        assistantContent
+      ) {
+
+        const assistantMessage:
+          ConversationMessage = {
+
+          id:
+            crypto.randomUUID(),
+
+          conversationId,
+
+          role: "assistant",
+
+          content:
+            assistantContent,
+
+          createdAt: new Date(),
+        };
+
+        await this.conversationRepository
+          .addMessage(
+            assistantMessage
+          );
+      }
+
+      yield event;
+    }
+  }
 }
 }

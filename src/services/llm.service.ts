@@ -8,7 +8,7 @@ import {
   RetryOptions,
 } from "../utils/retry.js";
 
-import { LLMProvider } from "../providers/llm.provider.js";
+import { LLMProvider, LLMStreamEvent } from "../providers/llm.provider.js";
 
 export class LLMService {
 
@@ -31,9 +31,13 @@ export class LLMService {
   }
 
   stream(
-    request: LLMRequest ,signal?: AbortSignal
-  ): AsyncIterable<string> {
+    request: LLMRequest,
+    signal?: AbortSignal
+  ): AsyncIterable<LLMStreamEvent> {
 
-    return this.provider.stream(request,signal);
+    return this.provider.stream(
+      request,
+      signal
+    );
   }
 }

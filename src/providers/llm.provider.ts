@@ -4,6 +4,24 @@ import {
 } from "../types/ai.types.js";
 
 
+export type LLMStreamEvent =
+  | {
+      type: "token";
+      content: string;
+    }
+  | {
+      type: "usage";
+      model: string;
+      usage: NonNullable<
+        LLMResponse["usage"]
+      >;
+    }
+  | {
+      type: "done";
+      finishReason?: string;
+    };
+
+
 export interface LLMProvider {
 
   generate(
@@ -14,5 +32,5 @@ export interface LLMProvider {
   stream(
     request: LLMRequest,
     signal?: AbortSignal
-  ): AsyncIterable<string>;
+  ): AsyncIterable<LLMStreamEvent>;
 }

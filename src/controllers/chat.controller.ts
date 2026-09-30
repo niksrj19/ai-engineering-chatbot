@@ -70,31 +70,52 @@ export class ChatController {
   res: Response,
   next: NextFunction
 ) => {
-   const controller =
+
+  const controller =
     new AbortController();
 
   try {
 
-    // req.on("close", () => {
+    req.on(
+      "close",
+      () => {
 
-    //   if (!res.writableEnded) {
-    //     controller.abort();
+        if (
+          !res.writableEnded
+        ) {
+          controller.abort();
 
-    //     console.log(
-    //       "Client disconnected. " +
-    //       "Aborting LLM request."
-    //     );
-    //   }
-    // });
+          console.log(
+            "Client disconnected. Aborting LLM request."
+          );
+        }
+      }
+    );
 
-    const { message } = req.body;
+    const {
+      conversationId,
+      message,
+    } = req.body;
 
     if (
-      typeof message !== "string" ||
+      typeof conversationId !==
+        "string" ||
+      !conversationId.trim()
+    ) {
+      return res.status(400).json({
+        error:
+          "conversationId is required",
+      });
+    }
+
+    if (
+      typeof message !==
+        "string" ||
       !message.trim()
     ) {
       return res.status(400).json({
-        error: "message is required",
+        error:
+          "message is required",
       });
     }
 
@@ -116,38 +137,41 @@ export class ChatController {
     res.flushHeaders();
 
     const stream =
-      this.chatService.stream(message);
+      this.chatService.stream(
+        conversationId,
+        message,
+        controller.signal
+      );
 
-    for await (const chunk of stream) {
+    for await (
+      const event of stream
+    ) {
+
+      if (
+        controller.signal.aborted
+      ) {
+        break;
+      }
 
       res.write(
-        `data: ${JSON.stringify({
-          type: "token",
-          content: chunk,
-        })}\n\n`
+        `data: ${JSON.stringify(
+          event
+        )}\n\n`
       );
     }
 
-    res.write(
-      `data: ${JSON.stringify({
-        type: "done",
-      })}\n\n`
-    );
-
-    if (!controller.signal.aborted) {
-
-      res.write(
-        `data: ${JSON.stringify({
-          type: "done",
-        })}\n\n`
-      );
+    if (
+      !controller.signal.aborted
+    ) {
 
       res.end();
     }
 
   } catch (error) {
 
-     if (controller.signal.aborted) {
+    if (
+      controller.signal.aborted
+    ) {
       return;
     }
 
