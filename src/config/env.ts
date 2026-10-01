@@ -34,9 +34,9 @@ export const env = {
 };
 
 export const aiBudget = {
-  maxLLMRounds: 1,
+  maxLLMRounds: 5,
   maxToolCalls: 5,
   maxInputTokens: 50_000,
   maxOutputTokens: 10_000,
-  maxTotalTokens: 100,
+  maxTotalTokens: 100_000,
 };

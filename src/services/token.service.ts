@@ -1,3 +1,7 @@
+import {
+  LLMMessage,
+} from "../types/ai.types.js";
+
 export interface TokenEstimate {
   inputTokens: number;
   outputTokens: number;
@@ -23,19 +27,26 @@ export class TokenService {
   }
 
   estimateMessagesTokens(
-    messages: Array<{
-      role: string;
-      content: string;
-    }>
+    messages: LLMMessage[]
   ): number {
 
     return messages.reduce(
       (total, message) => {
 
+        /*
+         * Tool-call assistant messages can
+         * have content === null.
+         *
+         * For token estimation we only
+         * estimate textual content here.
+         */
+        const content =
+          message.content ?? "";
+
         return (
           total +
           this.estimateTextTokens(
-            message.content
+            content
           )
         );
 
@@ -45,10 +56,7 @@ export class TokenService {
   }
 
   estimateRequest(
-    messages: Array<{
-      role: string;
-      content: string;
-    }>,
+    messages: LLMMessage[],
     maxOutputTokens: number
   ): TokenEstimate {
 
@@ -59,7 +67,10 @@ export class TokenService {
 
     return {
       inputTokens,
-      outputTokens: maxOutputTokens,
+
+      outputTokens:
+        maxOutputTokens,
+
       totalTokens:
         inputTokens +
         maxOutputTokens,
