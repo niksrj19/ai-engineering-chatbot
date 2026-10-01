@@ -34,3 +34,19 @@ export interface LLMProvider {
     signal?: AbortSignal
   ): AsyncIterable<LLMStreamEvent>;
 }
+
+export class LLMProviderError
+  extends Error {
+
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+    public readonly retryable = false,
+    public readonly retryAfterMs?: number
+  ) {
+    super(message);
+
+    this.name =
+      "LLMProviderError";
+  }
+}
