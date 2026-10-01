@@ -45,6 +45,7 @@ import {
 import { StructuredOutputService } from "./structured-output.service.js";
 import { OrderResponseValidator } from "./order-response.validator.js";
 import { OrderResponseSchema } from "../schemas/order-response.schema.js";
+import { InputGuardrailService } from "./input-guardrail.service.js";
 
 export class ChatService {
 
@@ -72,16 +73,30 @@ export class ChatService {
     private readonly toolExecutor:
       ToolExecutor,
 
-      private readonly structuredOutputService: StructuredOutputService,
+    private readonly structuredOutputService: StructuredOutputService,
 
-private readonly orderResponseValidator: OrderResponseValidator,
-  ) {}
+    private readonly orderResponseValidator: OrderResponseValidator,
+    private readonly inputGuardrailService:
+      InputGuardrailService,
+  ) { }
 
   async chat(
     conversationId: string,
     message: string,
     requestContext: ToolContext
   ): Promise<LLMResponse> {
+//guardrail validation at starting of chat function
+    const guardrail =
+      this.inputGuardrailService.validate(
+        message
+      );
+
+    if (!guardrail.allowed) {
+      throw new Error(
+        guardrail.reason ??
+        "Request rejected by input guardrail"
+      );
+    }
 
     /*
      * --------------------------------------------------
@@ -154,9 +169,9 @@ private readonly orderResponseValidator: OrderResponseValidator,
 
 
 
-      /*
-     * 4. Add system instructions
-     */
+    /*
+   * 4. Add system instructions
+   */
     const messages: LLMMessage[] = [
       {
         role: "system",
@@ -218,58 +233,58 @@ Use the tool result as the source of truth.`,
         }));
 
     const isOrderRequest =
-  message
-    .toLowerCase()
-    .includes("order");
+      message
+        .toLowerCase()
+        .includes("order");
 
-  const outputSchema =
-  isOrderRequest
-    ? {
-        name: "order_response",
+    const outputSchema =
+      isOrderRequest
+        ? {
+          name: "order_response",
 
-        description:
-          "Structured response containing order information.",
+          description:
+            "Structured response containing order information.",
 
-        schema: {
-          type: "object",
+          schema: {
+            type: "object",
 
-          properties: {
-            orderId: {
-              type: "string",
+            properties: {
+              orderId: {
+                type: "string",
+              },
+
+              status: {
+                type: "string",
+              },
+
+              estimatedMinutes: {
+                type: "integer",
+              },
             },
 
-            status: {
-              type: "string",
-            },
+            required: [
+              "orderId",
+              "status",
+              "estimatedMinutes",
+            ],
 
-            estimatedMinutes: {
-              type: "integer",
-            },
+            additionalProperties:
+              false,
           },
+        }
+        : undefined;
 
-          required: [
-            "orderId",
-            "status",
-            "estimatedMinutes",
-          ],
-
-          additionalProperties:
-            false,
-        },
-      }
-    : undefined;
-
- /*
-     * 6. Track total usage across
-     *    every LLM call.
-     */
+    /*
+        * 6. Track total usage across
+        *    every LLM call.
+        */
     const totalUsage = {
       inputTokens: 0,
       outputTokens: 0,
       totalTokens: 0,
     };
 
-     let finalResponse:
+    let finalResponse:
       LLMResponse | undefined;
 
     /*
@@ -279,9 +294,9 @@ Use the tool result as the source of truth.`,
      */
 
 
-      /*
-     * 7. Tool loop
-     */
+    /*
+   * 7. Tool loop
+   */
     for (
       let round = 1;
       round <= this.maxToolRounds;
@@ -428,9 +443,9 @@ Use the tool result as the source of truth.`,
             JSON.stringify(result),
         });
       }
-      
+
     }
-    
+
     if (!finalResponse) {
       throw new Error(
         "Maximum tool execution rounds exceeded"
@@ -438,24 +453,24 @@ Use the tool result as the source of truth.`,
     }
 
     let validatedResponse:
-  | ReturnType<
-      OrderResponseValidator["validate"]
-    >
-  | undefined;
+      | ReturnType<
+        OrderResponseValidator["validate"]
+      >
+      | undefined;
 
-if (isOrderRequest) {
+    if (isOrderRequest) {
 
-  const structuredResponse =
-    this.structuredOutputService.parse(
-      finalResponse.content,
-      OrderResponseSchema
-    );
+      const structuredResponse =
+        this.structuredOutputService.parse(
+          finalResponse.content,
+          OrderResponseSchema
+        );
 
-  validatedResponse =
-    this.orderResponseValidator.validate(
-      structuredResponse
-    );
-}
+      validatedResponse =
+        this.orderResponseValidator.validate(
+          structuredResponse
+        );
+    }
 
     // const response =
     //   await this.llmService.generate({
@@ -516,7 +531,7 @@ if (isOrderRequest) {
     //   }
     // }
 
-    
+
 
 
     this.logCost(
@@ -530,7 +545,7 @@ if (isOrderRequest) {
      * --------------------------------------------------
      */
 
-    
+
 
     const assistantMessage:
       ConversationMessage = {
@@ -569,13 +584,13 @@ if (isOrderRequest) {
       ...finalResponse,
 
       structuredOutput:
-    validatedResponse,
+        validatedResponse,
 
       usage: totalUsage,
     };
   }
 
-    private accumulateUsage(
+  private accumulateUsage(
     total: {
       inputTokens: number;
       outputTokens: number;
@@ -635,15 +650,15 @@ if (isOrderRequest) {
   }
 
   async *stream(
-  conversationId: string,
-  message: string,
-  signal?: AbortSignal
-): AsyncIterable<
-  | {
+    conversationId: string,
+    message: string,
+    signal?: AbortSignal
+  ): AsyncIterable<
+    | {
       type: "token";
       content: string;
     }
-  | {
+    | {
       type: "usage";
       usage: {
         inputTokens: number;
@@ -656,213 +671,213 @@ if (isOrderRequest) {
         totalCost: number;
       };
     }
-  | {
+    | {
       type: "done";
       finishReason?: string;
     }
-> {
+  > {
 
-  /*
-   * 1. Load conversation
-   */
+    /*
+     * 1. Load conversation
+     */
 
-  const history =
+    const history =
+      await this.conversationRepository
+        .getMessages(
+          conversationId
+        );
+
+    /*
+     * 2. Create user message
+     */
+
+    const userMessage:
+      ConversationMessage = {
+
+      id:
+        crypto.randomUUID(),
+
+      conversationId,
+
+      role: "user",
+
+      content: message,
+
+      createdAt: new Date(),
+    };
+
+    /*
+     * 3. Persist user message
+     */
+
     await this.conversationRepository
-      .getMessages(
-        conversationId
+      .addMessage(
+        userMessage
       );
-
-  /*
-   * 2. Create user message
-   */
-
-  const userMessage:
-    ConversationMessage = {
-
-    id:
-      crypto.randomUUID(),
-
-    conversationId,
-
-    role: "user",
-
-    content: message,
-
-    createdAt: new Date(),
-  };
-
-  /*
-   * 3. Persist user message
-   */
-
-  await this.conversationRepository
-    .addMessage(
-      userMessage
-    );
-
-  /*
-   * 4. Build complete history
-   */
-
-  const updatedHistory = [
-    ...history,
-    userMessage,
-  ];
-
-  /*
-   * 5. Build token-aware context
-   */
-
-  const context =
-    this.contextService
-      .buildContext(
-        updatedHistory
-      );
-
-  /*
-   * 6. Preflight token estimate
-   */
-
-  const maxOutputTokens = 4000;
-
-  const estimatedUsage =
-    this.tokenService
-      .estimateRequest(
-        context,
-        maxOutputTokens
-      );
-
-  console.log(
-    "Estimated streaming usage:",
-    estimatedUsage
-  );
-
-  /*
-   * 7. Start LLM stream
-   */
-
-  const stream =
-    this.llmService.stream(
-      {
-        messages: context,
-        temperature: 0.2,
-        maxTokens: maxOutputTokens,
-      },
-      signal
-    );
-
-  /*
-   * 8. Accumulate assistant response
-   */
-
-  let assistantContent = "";
-
-  for await (
-    const event of stream
-  ) {
-
-    if (
-      signal?.aborted
-    ) {
-      return;
-    }
 
     /*
-     * Token event
+     * 4. Build complete history
      */
 
-    if (
-      event.type === "token"
-    ) {
-
-      assistantContent +=
-        event.content;
-
-      yield event;
-
-      continue;
-    }
-
-    /*
-     * Usage event
-     */
-
-   if (event.type === "usage") {
-
-  const pricing =
-    modelPricing[
-      event.model
+    const updatedHistory = [
+      ...history,
+      userMessage,
     ];
 
-  let cost;
-
-  if (pricing) {
-
-    cost =
-      this.costService.calculate(
-        {
-          inputTokens:
-            event.usage.inputTokens,
-
-          outputTokens:
-            event.usage.outputTokens,
-        },
-        pricing
-      );
-  }
-
-  yield {
-    type: "usage",
-
-    usage: event.usage,
-
-    cost,
-  };
-
-  continue;
-}
-
     /*
-     * Done event
+     * 5. Build token-aware context
      */
 
-    if (
-      event.type === "done"
+    const context =
+      this.contextService
+        .buildContext(
+          updatedHistory
+        );
+
+    /*
+     * 6. Preflight token estimate
+     */
+
+    const maxOutputTokens = 4000;
+
+    const estimatedUsage =
+      this.tokenService
+        .estimateRequest(
+          context,
+          maxOutputTokens
+        );
+
+    console.log(
+      "Estimated streaming usage:",
+      estimatedUsage
+    );
+
+    /*
+     * 7. Start LLM stream
+     */
+
+    const stream =
+      this.llmService.stream(
+        {
+          messages: context,
+          temperature: 0.2,
+          maxTokens: maxOutputTokens,
+        },
+        signal
+      );
+
+    /*
+     * 8. Accumulate assistant response
+     */
+
+    let assistantContent = "";
+
+    for await (
+      const event of stream
     ) {
 
+      if (
+        signal?.aborted
+      ) {
+        return;
+      }
+
       /*
-       * Persist assistant message
-       * only after the stream completed.
+       * Token event
        */
 
       if (
-        assistantContent
+        event.type === "token"
       ) {
 
-        const assistantMessage:
-          ConversationMessage = {
+        assistantContent +=
+          event.content;
 
-          id:
-            crypto.randomUUID(),
+        yield event;
 
-          conversationId,
-
-          role: "assistant",
-
-          content:
-            assistantContent,
-
-          createdAt: new Date(),
-        };
-
-        await this.conversationRepository
-          .addMessage(
-            assistantMessage
-          );
+        continue;
       }
 
-      yield event;
+      /*
+       * Usage event
+       */
+
+      if (event.type === "usage") {
+
+        const pricing =
+          modelPricing[
+          event.model
+          ];
+
+        let cost;
+
+        if (pricing) {
+
+          cost =
+            this.costService.calculate(
+              {
+                inputTokens:
+                  event.usage.inputTokens,
+
+                outputTokens:
+                  event.usage.outputTokens,
+              },
+              pricing
+            );
+        }
+
+        yield {
+          type: "usage",
+
+          usage: event.usage,
+
+          cost,
+        };
+
+        continue;
+      }
+
+      /*
+       * Done event
+       */
+
+      if (
+        event.type === "done"
+      ) {
+
+        /*
+         * Persist assistant message
+         * only after the stream completed.
+         */
+
+        if (
+          assistantContent
+        ) {
+
+          const assistantMessage:
+            ConversationMessage = {
+
+            id:
+              crypto.randomUUID(),
+
+            conversationId,
+
+            role: "assistant",
+
+            content:
+              assistantContent,
+
+            createdAt: new Date(),
+          };
+
+          await this.conversationRepository
+            .addMessage(
+              assistantMessage
+            );
+        }
+
+        yield event;
+      }
     }
   }
-}
 }
