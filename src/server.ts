@@ -52,6 +52,10 @@ import {
 } from "./routes/chat.routes.js";
 
 import {
+  CircuitBreaker,
+} from "./services/circuit-breaker.service.js";
+
+import {
   errorMiddleware,
 } from "./middleware/error.middleware.js";
 import { MockLLMProvider } from "./providers/mock.provider.js";
@@ -81,7 +85,7 @@ const toolAuthorization =
 
 const toolExecutor =
   new ToolExecutor(
-    toolRegistry , toolAuthorization
+    toolRegistry, toolAuthorization
   );
 
 /*
@@ -104,11 +108,39 @@ const provider = new MockLLMProvider();
  * --------------------------------------------------
  */
 
-const llmService =
-  new LLMService(
-    provider,
-    env.retry
-  );
+// const llmService =
+//   new LLMService(
+//     provider,
+//     env.retry,
+
+//   );
+
+/**
+  *  CIRCUIT BREAKER CODE 
+  * 
+  * 
+  */
+const llmCircuitBreaker =
+  new CircuitBreaker({
+    failureThreshold: 3,
+    resetTimeoutMs: 10_000,
+
+    onStateChange: (
+      previousState,
+      nextState
+    ) => {
+      console.log(
+        `[LLM Circuit Breaker] ${previousState} → ${nextState}`
+      );
+    },
+  });
+
+
+const llmService = new LLMService(
+  provider,
+  env.retry,
+  llmCircuitBreaker
+);
 
 /*
  * --------------------------------------------------
@@ -153,18 +185,21 @@ const costService =
 const structuredOutputService =
   new StructuredOutputService();
 
-  const orderResponseValidator =
+const orderResponseValidator =
   new OrderResponseValidator();
 
 
-  /*
- * --------------------------------------------------
- * AI Budget Service
- * --------------------------------------------------
- */
+/*
+* --------------------------------------------------
+* AI Budget Service
+* --------------------------------------------------
+*/
 
-  const aiBudgetService =
+const aiBudgetService =
   new AIBudgetService(aiBudget);
+
+
+
 
 /*
  * --------------------------------------------------
