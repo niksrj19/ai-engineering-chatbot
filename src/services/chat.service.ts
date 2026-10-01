@@ -46,6 +46,7 @@ import { StructuredOutputService } from "./structured-output.service.js";
 import { OrderResponseValidator } from "./order-response.validator.js";
 import { OrderResponseSchema } from "../schemas/order-response.schema.js";
 import { InputGuardrailService } from "./input-guardrail.service.js";
+import { AIBudgetService } from "./ai-budget.service.js";
 
 export class ChatService {
 
@@ -78,6 +79,8 @@ export class ChatService {
     private readonly orderResponseValidator: OrderResponseValidator,
     private readonly inputGuardrailService:
       InputGuardrailService,
+    private readonly aiBudgetService:
+      AIBudgetService,
   ) { }
 
   async chat(
@@ -85,7 +88,7 @@ export class ChatService {
     message: string,
     requestContext: ToolContext
   ): Promise<LLMResponse> {
-//guardrail validation at starting of chat function
+    //guardrail validation at starting of chat function
     const guardrail =
       this.inputGuardrailService.validate(
         message
@@ -207,6 +210,18 @@ Use the tool result as the source of truth.`,
           context,
           maxOutputTokens
         );
+    //This is a preflight check. below
+
+    if (
+      !this.aiBudgetService.canConsumeEstimatedTokens(
+        estimatedUsage.inputTokens,
+        estimatedUsage.outputTokens
+      )
+    ) {
+      throw new Error(
+        "AI request would exceed token budget"
+      );
+    }
 
     console.log(
       "Estimated token usage:",
@@ -306,6 +321,12 @@ Use the tool result as the source of truth.`,
       console.log(
         `LLM execution round: ${round}`
       );
+      /*
+      How much did this request cost?
+      CostService
+       * 7.1 Record LLM round in AI budget
+      */
+      this.aiBudgetService.recordLLMRound();
 
       const response =
         await this.llmService.generate({
@@ -328,6 +349,18 @@ Use the tool result as the source of truth.`,
         totalUsage,
         response
       );
+
+      /* checking AI budget for estimated tokens
+        Are we still allowed to continue?
+
+        This is the actual enforcement check.
+      */
+
+      if (response.usage) {
+        this.aiBudgetService.recordUsage(
+          response.usage
+        );
+      }
 
       /*
        * 8. No tool call
@@ -355,6 +388,17 @@ Use the tool result as the source of truth.`,
         toolCalls:
           response.toolCalls,
       });
+
+      //Record tool calls
+
+      if (
+        response.toolCalls &&
+        response.toolCalls.length > 0
+      ) {
+        this.aiBudgetService.recordToolCall(
+          response.toolCalls.length
+        );
+      }
 
       /*
        * 10. Execute each requested tool.
@@ -445,6 +489,11 @@ Use the tool result as the source of truth.`,
       }
 
     }
+
+    console.log(
+  "AI budget usage:",
+  this.aiBudgetService.getUsage()
+);
 
     if (!finalResponse) {
       throw new Error(
