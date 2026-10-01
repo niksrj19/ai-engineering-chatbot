@@ -32,3 +32,11 @@ export const env = {
     safetyBufferTokens: 1000,
   },
 };
+
+export const aiBudget = {
+  maxLLMRounds: 1,
+  maxToolCalls: 5,
+  maxInputTokens: 50_000,
+  maxOutputTokens: 10_000,
+  maxTotalTokens: 100,
+};

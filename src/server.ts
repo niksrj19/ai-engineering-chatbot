@@ -13,6 +13,7 @@ import {
 } from "./tools/tools/get-order-status.tool.js";
 
 import {
+  aiBudget,
   env,
 } from "./config/env.js";
 
@@ -58,6 +59,7 @@ import { ToolAuthorizationService } from "./tools/tool.authorization.js";
 import { OrderResponseValidator } from "./services/order-response.validator.js";
 import { StructuredOutputService } from "./services/structured-output.service.js";
 import { InputGuardrailService } from "./services/input-guardrail.service.js";
+import { AIBudgetService } from "./services/ai-budget.service.js";
 
 const app = express();
 
@@ -154,6 +156,16 @@ const structuredOutputService =
   const orderResponseValidator =
   new OrderResponseValidator();
 
+
+  /*
+ * --------------------------------------------------
+ * AI Budget Service
+ * --------------------------------------------------
+ */
+
+  const aiBudgetService =
+  new AIBudgetService(aiBudget);
+
 /*
  * --------------------------------------------------
  * Chat Service
@@ -171,7 +183,8 @@ const chatService =
     toolExecutor,
     structuredOutputService,
     orderResponseValidator,
-    inputGuardrailService
+    inputGuardrailService,
+    aiBudgetService
   );
 
 /*
