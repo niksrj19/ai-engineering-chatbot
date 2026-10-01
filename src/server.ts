@@ -57,12 +57,14 @@ import { MockLLMProvider } from "./providers/mock.provider.js";
 import { ToolAuthorizationService } from "./tools/tool.authorization.js";
 import { OrderResponseValidator } from "./services/order-response.validator.js";
 import { StructuredOutputService } from "./services/structured-output.service.js";
+import { InputGuardrailService } from "./services/input-guardrail.service.js";
 
 const app = express();
 
 app.use(express.json());
 
-
+const inputGuardrailService =
+  new InputGuardrailService();
 
 const toolRegistry =
   new ToolRegistry();
@@ -168,7 +170,8 @@ const chatService =
     toolRegistry,
     toolExecutor,
     structuredOutputService,
-    orderResponseValidator
+    orderResponseValidator,
+    inputGuardrailService
   );
 
 /*
