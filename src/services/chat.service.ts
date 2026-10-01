@@ -42,19 +42,40 @@ import {
 import {
   modelPricing,
 } from "../config/model-pricing.js";
-import { StructuredOutputService } from "./structured-output.service.js";
-import { OrderResponseValidator } from "./order-response.validator.js";
-import { OrderResponseSchema } from "../schemas/order-response.schema.js";
-import { InputGuardrailService } from "./input-guardrail.service.js";
-import { AIBudgetService } from "./ai-budget.service.js";
+
+import {
+  StructuredOutputService,
+} from "./structured-output.service.js";
+
+import {
+  OrderResponseValidator,
+} from "./order-response.validator.js";
+
+import {
+  OrderResponseSchema,
+} from "../schemas/order-response.schema.js";
+
+import {
+  InputGuardrailService,
+} from "./input-guardrail.service.js";
+
+import {
+  AIBudgetService,
+} from "./ai-budget.service.js";
 
 export class ChatService {
-
+  /**
+   * Hard safety ceiling for tool-loop execution.
+   *
+   * AIBudgetService also controls LLM rounds.
+   * This limit protects the application even if
+   * another budget configuration is accidentally
+   * changed.
+   */
   private readonly maxToolRounds = 5;
 
   constructor(
-    private readonly llmService:
-      LLMService,
+    private readonly llmService: LLMService,
 
     private readonly conversationRepository:
       ConversationRepository,
@@ -74,21 +95,126 @@ export class ChatService {
     private readonly toolExecutor:
       ToolExecutor,
 
-    private readonly structuredOutputService: StructuredOutputService,
+    private readonly structuredOutputService:
+      StructuredOutputService,
 
-    private readonly orderResponseValidator: OrderResponseValidator,
+    private readonly orderResponseValidator:
+      OrderResponseValidator,
+
     private readonly inputGuardrailService:
       InputGuardrailService,
+
     private readonly aiBudgetService:
       AIBudgetService,
-  ) { }
+  ) {}
 
+  /**
+   * Shared system instructions.
+   *
+   * Keeping this in one place prevents
+   * chat() and stream() from behaving
+   * differently.
+   */
+  private buildSystemPrompt(): string {
+    return `You are a helpful enterprise AI assistant.
+
+You can use available tools when necessary.
+
+Never invent tool results.
+
+Use the tool result as the source of truth.`;
+  }
+
+  /**
+   * Convert registered tools into the
+   * provider-independent LLM tool format.
+   */
+  private buildTools() {
+    return this.toolRegistry
+      .getAll()
+      .map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }));
+  }
+
+  /**
+   * Determine whether the current learning
+   * example should use the structured order
+   * response.
+   *
+   * NOTE:
+   * This is intentionally retained from the
+   * existing project. Later we can replace it
+   * with proper intent classification/routing.
+   */
+  private isOrderRequest(
+    message: string
+  ): boolean {
+    return message
+      .toLowerCase()
+      .includes("order");
+  }
+
+  /**
+   * Build the structured output schema
+   * used for the order example.
+   */
+  private buildOrderOutputSchema() {
+    return {
+      name: "order_response",
+
+      description:
+        "Structured response containing order information.",
+
+      schema: {
+        type: "object",
+
+        properties: {
+          orderId: {
+            type: "string",
+          },
+
+          status: {
+            type: "string",
+          },
+
+          estimatedMinutes: {
+            type: "integer",
+          },
+        },
+
+        required: [
+          "orderId",
+          "status",
+          "estimatedMinutes",
+        ],
+
+        additionalProperties: false,
+      },
+    };
+  }
+
+  /**
+   * Normal chat request.
+   */
   async chat(
     conversationId: string,
     message: string,
     requestContext: ToolContext
   ): Promise<LLMResponse> {
-    //guardrail validation at starting of chat function
+
+    /*
+     * --------------------------------------------------
+     * 1. Input guardrail
+     * --------------------------------------------------
+     *
+     * Validate before:
+     * - DB access
+     * - persistence
+     * - LLM execution
+     */
     const guardrail =
       this.inputGuardrailService.validate(
         message
@@ -103,10 +229,9 @@ export class ChatService {
 
     /*
      * --------------------------------------------------
-     * 1. Load existing conversation history
+     * 2. Load existing conversation history
      * --------------------------------------------------
      */
-
     const history =
       await this.conversationRepository
         .getMessages(
@@ -115,10 +240,9 @@ export class ChatService {
 
     /*
      * --------------------------------------------------
-     * 2. Create user message
+     * 3. Create user message
      * --------------------------------------------------
      */
-
     const userMessage:
       ConversationMessage = {
 
@@ -136,10 +260,9 @@ export class ChatService {
 
     /*
      * --------------------------------------------------
-     * 3. Persist user message
+     * 4. Persist user message
      * --------------------------------------------------
      */
-
     await this.conversationRepository
       .addMessage(
         userMessage
@@ -147,12 +270,9 @@ export class ChatService {
 
     /*
      * --------------------------------------------------
-     * 4. Build updated history
-     *
-     * Existing history + current user message
+     * 5. Build updated history
      * --------------------------------------------------
      */
-
     const updatedHistory = [
       ...history,
       userMessage,
@@ -160,33 +280,28 @@ export class ChatService {
 
     /*
      * --------------------------------------------------
-     * 5. Build token-aware context
+     * 6. Build token-aware context
      * --------------------------------------------------
      */
-
     const context =
       this.contextService
         .buildContext(
           updatedHistory
         );
 
-
-
     /*
-   * 4. Add system instructions
-   */
-    const messages: LLMMessage[] = [
+     * --------------------------------------------------
+     * 7. Add system instructions
+     * --------------------------------------------------
+     */
+    const messages:
+      LLMMessage[] = [
+
       {
         role: "system",
 
         content:
-          `You are a helpful enterprise AI assistant.
-
-You can use available tools when necessary.
-
-Never invent tool results.
-
-Use the tool result as the source of truth.`,
+          this.buildSystemPrompt(),
       },
 
       ...context,
@@ -194,29 +309,24 @@ Use the tool result as the source of truth.`,
 
     /*
      * --------------------------------------------------
-     * 6. Estimate token usage
-     *
-     * This is only a preflight estimate.
+     * 8. Token preflight
      * --------------------------------------------------
      */
-
-
-
     const maxOutputTokens = 4000;
 
     const estimatedUsage =
       this.tokenService
         .estimateRequest(
-          context,
+          messages,
           maxOutputTokens
         );
-    //This is a preflight check. below
 
     if (
-      !this.aiBudgetService.canConsumeEstimatedTokens(
-        estimatedUsage.inputTokens,
-        estimatedUsage.outputTokens
-      )
+      !this.aiBudgetService
+        .canConsumeEstimatedTokens(
+          estimatedUsage.inputTokens,
+          estimatedUsage.outputTokens
+        )
     ) {
       throw new Error(
         "AI request would exceed token budget"
@@ -228,71 +338,35 @@ Use the tool result as the source of truth.`,
       estimatedUsage
     );
 
-
-
     /*
-     * 5. Convert registered tools
-     *    into LLM tool definitions.
+     * --------------------------------------------------
+     * 9. Build tools
+     * --------------------------------------------------
      */
     const tools =
-      this.toolRegistry
-        .getAll()
-        .map(tool => ({
-          name: tool.name,
+      this.buildTools();
 
-          description:
-            tool.description,
-
-          parameters:
-            tool.parameters,
-        }));
-
+    /*
+     * --------------------------------------------------
+     * 10. Determine structured-output use case
+     * --------------------------------------------------
+     */
     const isOrderRequest =
-      message
-        .toLowerCase()
-        .includes("order");
+      this.isOrderRequest(
+        message
+      );
 
     const outputSchema =
       isOrderRequest
-        ? {
-          name: "order_response",
-
-          description:
-            "Structured response containing order information.",
-
-          schema: {
-            type: "object",
-
-            properties: {
-              orderId: {
-                type: "string",
-              },
-
-              status: {
-                type: "string",
-              },
-
-              estimatedMinutes: {
-                type: "integer",
-              },
-            },
-
-            required: [
-              "orderId",
-              "status",
-              "estimatedMinutes",
-            ],
-
-            additionalProperties:
-              false,
-          },
-        }
+        ? this.buildOrderOutputSchema()
         : undefined;
 
     /*
-        * 6. Track total usage across
-        *    every LLM call.
-        */
+     * --------------------------------------------------
+     * 11. Track total usage across
+     *     every LLM round
+     * --------------------------------------------------
+     */
     const totalUsage = {
       inputTokens: 0,
       outputTokens: 0,
@@ -304,14 +378,9 @@ Use the tool result as the source of truth.`,
 
     /*
      * --------------------------------------------------
-     * 7. Call LLM
+     * 12. Tool / LLM execution loop
      * --------------------------------------------------
      */
-
-
-    /*
-   * 7. Tool loop
-   */
     for (
       let round = 1;
       round <= this.maxToolRounds;
@@ -321,63 +390,78 @@ Use the tool result as the source of truth.`,
       console.log(
         `LLM execution round: ${round}`
       );
-      /*
-      How much did this request cost?
-      CostService
-       * 7.1 Record LLM round in AI budget
-      */
-      this.aiBudgetService.recordLLMRound();
 
+      /*
+       * Record LLM round against
+       * request-level AI budget.
+       */
+      this.aiBudgetService
+        .recordLLMRound();
+
+      /*
+       * ------------------------------------------------
+       * 13. Call LLM
+       * ------------------------------------------------
+       */
       const response =
         await this.llmService.generate({
+
           messages,
 
           temperature: 0.2,
 
-          maxTokens: 4000,
+          maxTokens:
+            maxOutputTokens,
 
           tools,
 
-          outputSchema
+          outputSchema,
+
         });
 
       /*
-       * Accumulate usage from
-       * every LLM invocation.
+       * ------------------------------------------------
+       * 14. Accumulate usage
+       * ------------------------------------------------
        */
       this.accumulateUsage(
         totalUsage,
         response
       );
 
-      /* checking AI budget for estimated tokens
-        Are we still allowed to continue?
-
-        This is the actual enforcement check.
-      */
-
+      /*
+       * ------------------------------------------------
+       * 15. Enforce actual usage
+       * ------------------------------------------------
+       */
       if (response.usage) {
-        this.aiBudgetService.recordUsage(
-          response.usage
-        );
+
+        this.aiBudgetService
+          .recordUsage(
+            response.usage
+          );
       }
 
       /*
-       * 8. No tool call
-       *
-       * This is the final answer.
+       * ------------------------------------------------
+       * 16. No tool call = final response
+       * ------------------------------------------------
        */
       if (
         !response.toolCalls ||
         response.toolCalls.length === 0
       ) {
-        finalResponse = response;
+
+        finalResponse =
+          response;
+
         break;
       }
 
       /*
-       * 9. Add assistant tool-call
-       *    message to context.
+       * ------------------------------------------------
+       * 17. Add assistant tool-call message
+       * ------------------------------------------------
        */
       messages.push({
         role: "assistant",
@@ -389,19 +473,20 @@ Use the tool result as the source of truth.`,
           response.toolCalls,
       });
 
-      //Record tool calls
-
-      if (
-        response.toolCalls &&
-        response.toolCalls.length > 0
-      ) {
-        this.aiBudgetService.recordToolCall(
+      /*
+       * ------------------------------------------------
+       * 18. Record tool-call budget
+       * ------------------------------------------------
+       */
+      this.aiBudgetService
+        .recordToolCall(
           response.toolCalls.length
         );
-      }
 
       /*
-       * 10. Execute each requested tool.
+       * ------------------------------------------------
+       * 19. Execute tools
+       * ------------------------------------------------
        */
       for (
         const toolCall
@@ -416,10 +501,12 @@ Use the tool result as the source of truth.`,
           Record<string, unknown>;
 
         /*
-         * Tool arguments come from
-         * the LLM and are untrusted.
+         * Tool arguments come from the LLM
+         * and must always be treated as
+         * untrusted input.
          */
         try {
+
           const parsed =
             JSON.parse(
               toolCall.arguments
@@ -430,6 +517,7 @@ Use the tool result as the source of truth.`,
             typeof parsed !== "object" ||
             Array.isArray(parsed)
           ) {
+
             throw new Error(
               "Tool arguments must be an object"
             );
@@ -442,7 +530,14 @@ Use the tool result as the source of truth.`,
             >;
 
         } catch {
+
+          /*
+           * Return the tool failure to the
+           * LLM instead of crashing the
+           * complete conversation.
+           */
           messages.push({
+
             role: "tool",
 
             toolCallId:
@@ -450,10 +545,12 @@ Use the tool result as the source of truth.`,
 
             content:
               JSON.stringify({
+
                 success: false,
 
                 error:
                   "Invalid tool arguments",
+
               }),
           });
 
@@ -461,58 +558,86 @@ Use the tool result as the source of truth.`,
         }
 
         /*
-         * 11. Execute through our
-         *     controlled ToolExecutor.
+         * ------------------------------------------------
+         * 20. Execute through ToolExecutor
+         * ------------------------------------------------
+         *
+         * ToolExecutor remains responsible for:
+         * - registry lookup
+         * - authorization
+         * - validation
+         * - timeout
+         * - controlled execution
          */
         const result =
           await this.toolExecutor.execute(
+
             toolCall.name,
 
             args,
 
             requestContext
+
           );
 
         /*
-         * 12. Feed tool result
-         *     back to the LLM.
+         * ------------------------------------------------
+         * 21. Feed tool result back to LLM
+         * ------------------------------------------------
          */
         messages.push({
+
           role: "tool",
 
           toolCallId:
             toolCall.id,
 
           content:
-            JSON.stringify(result),
+            JSON.stringify(
+              result
+            ),
+
         });
       }
-
     }
 
     console.log(
-  "AI budget usage:",
-  this.aiBudgetService.getUsage()
-);
+      "AI budget usage:",
+      this.aiBudgetService.getUsage()
+    );
 
+    /*
+     * --------------------------------------------------
+     * 22. Ensure tool loop completed
+     * --------------------------------------------------
+     */
     if (!finalResponse) {
+
       throw new Error(
         "Maximum tool execution rounds exceeded"
       );
     }
 
+    /*
+     * --------------------------------------------------
+     * 23. Structured output validation
+     * --------------------------------------------------
+     */
     let validatedResponse:
       | ReturnType<
-        OrderResponseValidator["validate"]
-      >
+          OrderResponseValidator["validate"]
+        >
       | undefined;
 
     if (isOrderRequest) {
 
       const structuredResponse =
         this.structuredOutputService.parse(
+
           finalResponse.content,
+
           OrderResponseSchema
+
         );
 
       validatedResponse =
@@ -521,68 +646,13 @@ Use the tool result as the source of truth.`,
         );
     }
 
-    // const response =
-    //   await this.llmService.generate({
-    //     messages: context,
-
-    //     temperature: 0.2,
-
-    //     maxTokens:
-    //       maxOutputTokens,
-    //   });
-
     /*
      * --------------------------------------------------
-     * 8. Calculate actual cost
-     *
-     * Provider usage is authoritative.
+     * 24. Calculate actual cost
      * --------------------------------------------------
+     *
+     * Provider-reported usage is authoritative.
      */
-
-    // if (response.usage) {
-
-    //   const pricing =
-    //     modelPricing[
-    //       response.model
-    //     ];
-
-    //   if (pricing) {
-
-    //     const cost =
-    //       this.costService.calculate(
-    //         {
-    //           inputTokens:
-    //             response.usage
-    //               .inputTokens,
-
-    //           outputTokens:
-    //             response.usage
-    //               .outputTokens,
-    //         },
-
-    //         pricing
-    //       );
-
-    //     console.log(
-    //       "Actual token usage:",
-    //       response.usage
-    //     );
-
-    //     console.log(
-    //       "Actual AI cost:",
-    //       cost
-    //     );
-    //   } else {
-
-    //     console.warn(
-    //       `No pricing configured for model: ${response.model}`
-    //     );
-    //   }
-    // }
-
-
-
-
     this.logCost(
       finalResponse.model,
       totalUsage
@@ -590,12 +660,9 @@ Use the tool result as the source of truth.`,
 
     /*
      * --------------------------------------------------
-     * 9. Create assistant message
+     * 25. Create assistant message
      * --------------------------------------------------
      */
-
-
-
     const assistantMessage:
       ConversationMessage = {
 
@@ -614,10 +681,9 @@ Use the tool result as the source of truth.`,
 
     /*
      * --------------------------------------------------
-     * 10. Persist assistant response
+     * 26. Persist assistant response
      * --------------------------------------------------
      */
-
     await this.conversationRepository
       .addMessage(
         assistantMessage
@@ -625,27 +691,34 @@ Use the tool result as the source of truth.`,
 
     /*
      * --------------------------------------------------
-     * 11. Return LLM response
+     * 27. Return response
      * --------------------------------------------------
      */
-
     return {
+
       ...finalResponse,
 
       structuredOutput:
         validatedResponse,
 
-      usage: totalUsage,
+      usage:
+        totalUsage,
+
     };
   }
 
+  /**
+   * Accumulate usage from multiple LLM rounds.
+   */
   private accumulateUsage(
     total: {
       inputTokens: number;
       outputTokens: number;
       totalTokens: number;
     },
-    response: LLMResponse
+
+    response:
+      LLMResponse
   ): void {
 
     if (!response.usage) {
@@ -662,8 +735,12 @@ Use the tool result as the source of truth.`,
       response.usage.totalTokens;
   }
 
+  /**
+   * Calculate and log total AI cost.
+   */
   private logCost(
     model: string,
+
     usage: {
       inputTokens: number;
       outputTokens: number;
@@ -674,6 +751,7 @@ Use the tool result as the source of truth.`,
       modelPricing[model];
 
     if (!pricing) {
+
       console.warn(
         `No pricing configured for ${model}`
       );
@@ -698,38 +776,64 @@ Use the tool result as the source of truth.`,
     );
   }
 
+  /**
+   * Streaming chat.
+   */
   async *stream(
     conversationId: string,
     message: string,
     signal?: AbortSignal
   ): AsyncIterable<
     | {
-      type: "token";
-      content: string;
-    }
+        type: "token";
+        content: string;
+      }
     | {
-      type: "usage";
-      usage: {
-        inputTokens: number;
-        outputTokens: number;
-        totalTokens: number;
-      };
-      cost?: {
-        inputCost: number;
-        outputCost: number;
-        totalCost: number;
-      };
-    }
+        type: "usage";
+        usage: {
+          inputTokens: number;
+          outputTokens: number;
+          totalTokens: number;
+        };
+        cost?: {
+          inputCost: number;
+          outputCost: number;
+          totalCost: number;
+        };
+      }
     | {
-      type: "done";
-      finishReason?: string;
-    }
+        type: "done";
+        finishReason?: string;
+      }
   > {
 
     /*
-     * 1. Load conversation
+     * --------------------------------------------------
+     * 1. Input guardrail
+     * --------------------------------------------------
+     *
+     * Previously stream() skipped the guardrail.
+     * Now both execution paths have the same
+     * security boundary.
      */
+    const guardrail =
+      this.inputGuardrailService.validate(
+        message
+      );
 
+    if (!guardrail.allowed) {
+
+      throw new Error(
+        guardrail.reason ??
+        "Request rejected by input guardrail"
+      );
+    }
+
+    /*
+     * --------------------------------------------------
+     * 2. Load conversation
+     * --------------------------------------------------
+     */
     const history =
       await this.conversationRepository
         .getMessages(
@@ -737,9 +841,10 @@ Use the tool result as the source of truth.`,
         );
 
     /*
-     * 2. Create user message
+     * --------------------------------------------------
+     * 3. Create user message
+     * --------------------------------------------------
      */
-
     const userMessage:
       ConversationMessage = {
 
@@ -756,27 +861,30 @@ Use the tool result as the source of truth.`,
     };
 
     /*
-     * 3. Persist user message
+     * --------------------------------------------------
+     * 4. Persist user message
+     * --------------------------------------------------
      */
-
     await this.conversationRepository
       .addMessage(
         userMessage
       );
 
     /*
-     * 4. Build complete history
+     * --------------------------------------------------
+     * 5. Build complete history
+     * --------------------------------------------------
      */
-
     const updatedHistory = [
       ...history,
       userMessage,
     ];
 
     /*
-     * 5. Build token-aware context
+     * --------------------------------------------------
+     * 6. Build token-aware context
+     * --------------------------------------------------
      */
-
     const context =
       this.contextService
         .buildContext(
@@ -784,15 +892,34 @@ Use the tool result as the source of truth.`,
         );
 
     /*
-     * 6. Preflight token estimate
+     * --------------------------------------------------
+     * 7. Build messages including system prompt
+     * --------------------------------------------------
      */
+    const messages:
+      LLMMessage[] = [
 
+      {
+        role: "system",
+
+        content:
+          this.buildSystemPrompt(),
+      },
+
+      ...context,
+    ];
+
+    /*
+     * --------------------------------------------------
+     * 8. Preflight token budget
+     * --------------------------------------------------
+     */
     const maxOutputTokens = 4000;
 
     const estimatedUsage =
       this.tokenService
         .estimateRequest(
-          context,
+          messages,
           maxOutputTokens
         );
 
@@ -801,40 +928,77 @@ Use the tool result as the source of truth.`,
       estimatedUsage
     );
 
-    /*
-     * 7. Start LLM stream
-     */
+    if (
+      !this.aiBudgetService
+        .canConsumeEstimatedTokens(
+          estimatedUsage.inputTokens,
+          estimatedUsage.outputTokens
+        )
+    ) {
 
+      throw new Error(
+        "AI streaming request would exceed token budget"
+      );
+    }
+
+    /*
+     * --------------------------------------------------
+     * 9. Record streaming LLM round
+     * --------------------------------------------------
+     *
+     * A streaming provider invocation is still
+     * one logical LLM round.
+     */
+    this.aiBudgetService
+      .recordLLMRound();
+
+    /*
+     * --------------------------------------------------
+     * 10. Start LLM stream
+     * --------------------------------------------------
+     */
     const stream =
       this.llmService.stream(
         {
-          messages: context,
+          messages,
+
           temperature: 0.2,
-          maxTokens: maxOutputTokens,
+
+          maxTokens:
+            maxOutputTokens,
         },
+
         signal
       );
 
     /*
-     * 8. Accumulate assistant response
+     * --------------------------------------------------
+     * 11. Accumulate assistant response
+     * --------------------------------------------------
      */
-
     let assistantContent = "";
 
     for await (
       const event of stream
     ) {
 
+      /*
+       * ------------------------------------------------
+       * Cancellation
+       * ------------------------------------------------
+       */
       if (
         signal?.aborted
       ) {
+
         return;
       }
 
       /*
+       * ------------------------------------------------
        * Token event
+       * ------------------------------------------------
        */
-
       if (
         event.type === "token"
       ) {
@@ -848,14 +1012,28 @@ Use the tool result as the source of truth.`,
       }
 
       /*
+       * ------------------------------------------------
        * Usage event
+       * ------------------------------------------------
        */
+      if (
+        event.type === "usage"
+      ) {
 
-      if (event.type === "usage") {
+        /*
+         * Enforce actual provider usage.
+         *
+         * This closes the previous streaming
+         * budget-enforcement gap.
+         */
+        this.aiBudgetService
+          .recordUsage(
+            event.usage
+          );
 
         const pricing =
           modelPricing[
-          event.model
+            event.model
           ];
 
         let cost;
@@ -866,39 +1044,45 @@ Use the tool result as the source of truth.`,
             this.costService.calculate(
               {
                 inputTokens:
-                  event.usage.inputTokens,
+                  event.usage
+                    .inputTokens,
 
                 outputTokens:
-                  event.usage.outputTokens,
+                  event.usage
+                    .outputTokens,
               },
+
               pricing
             );
         }
 
         yield {
+
           type: "usage",
 
-          usage: event.usage,
+          usage:
+            event.usage,
 
           cost,
+
         };
 
         continue;
       }
 
       /*
+       * ------------------------------------------------
        * Done event
+       * ------------------------------------------------
        */
-
       if (
         event.type === "done"
       ) {
 
         /*
-         * Persist assistant message
-         * only after the stream completed.
+         * Persist assistant response only
+         * after successful stream completion.
          */
-
         if (
           assistantContent
         ) {
@@ -924,6 +1108,11 @@ Use the tool result as the source of truth.`,
               assistantMessage
             );
         }
+
+        console.log(
+          "Streaming AI budget usage:",
+          this.aiBudgetService.getUsage()
+        );
 
         yield event;
       }
