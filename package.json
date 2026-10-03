@@ -8,7 +8,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "hybrid-demo": "tsx src/hybrid/hybrid-demo.ts",
     "embedding-demo": "tsx src/ingestion/embedding-demo.ts",
+    "evaluation-demo": "tsx src/evaluation/evaluation-demo.ts",
     "rag-demo": "tsx src/rag/rag-demo.ts",
     "build": "tsc",
     "start": "node dist/server.js"
