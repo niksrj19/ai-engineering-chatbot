@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "embedding-demo": "tsx src/ingestion/embedding-demo.ts",
+    "rag-demo": "tsx src/rag/rag-demo.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
