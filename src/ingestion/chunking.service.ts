@@ -1,7 +1,7 @@
 import {
   SourceDocument,
   DocumentChunk,
-} from "./document.types.js";
+} from "./document.types";
 
 export interface ChunkingOptions {
   chunkSize: number;

@@ -8,6 +8,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "rag-orchestrator-demo": "tsx src/rag/rag-orchestrator.demo.ts",
     "hybrid-demo": "tsx src/hybrid/hybrid-demo.ts",
     "query-demo": "tsx src/query/query-demo.ts",
     "embedding-demo": "tsx src/ingestion/embedding-demo.ts",

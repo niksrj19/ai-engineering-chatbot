@@ -68,7 +68,7 @@ export class ContextAssemblyService {
       "unknown";
 
     const vectorScore =
-      result.vectorScore.toFixed(3);
+      result?.vectorScore?.toFixed(3);
 
     const rerankScore =
       result.rerankScore !==
