@@ -56,35 +56,40 @@ export class RAGOrchestratorService {
   async retrieve(
     request: RAGOrchestrationRequest
   ): Promise<RAGOrchestrationResult> {
-    const decision =
-      this.decisionService.decide({
-        query: request.query,
-        mode: request.mode,
-      });
 
-    if (!decision.shouldRetrieve) {
-      return {
-        shouldRetrieve: false,
-        reason: decision.reason,
-        originalQuery: request.query,
-        results: [],
-        formattedContext: "",
-        hasRelevantContext: false,
-      };
-    }
-
-    const transformed =
+     const transformed =
       await this.queryTransformationService.transform({
         query: request.query,
         conversation:
           request.conversation,
       });
 
-    const queries = [
+       const queries = [
       transformed.rewrittenQuery,
       ...transformed.alternativeQueries,
     ];
 
+    const decision =
+  this.decisionService.decide({
+    query: transformed.rewrittenQuery,
+    mode: request.mode,
+  });
+    if (!decision.shouldRetrieve) {
+  return {
+    shouldRetrieve: false,
+    reason: decision.reason,
+    originalQuery: request.query,
+    rewrittenQuery:
+      transformed.rewrittenQuery,
+    alternativeQueries:
+      transformed.alternativeQueries,
+    results: [],
+    formattedContext: "",
+    hasRelevantContext: false,
+  };
+}
+
+  
     const uniqueQueries =
       Array.from(
         new Set(

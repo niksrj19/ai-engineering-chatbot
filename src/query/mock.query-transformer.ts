@@ -1,3 +1,4 @@
+
 import {
   QueryTransformer,
   QueryTransformationRequest,
@@ -27,11 +28,24 @@ export class MockQueryTransformer
         )
         .map(
           message =>
-            message.content
-        ) ?? [];
+            message.content.trim()
+        )
+        .filter(Boolean) ?? [];
 
+    /*
+     * Find the most recent previous user message.
+     *
+     * Do not rely on array positions such as at(-2),
+     * because the conversation may or may not contain
+     * the current query.
+     */
     const lastUserMessage =
-      previousUserMessages.at(-2);
+      [...previousUserMessages]
+        .reverse()
+        .find(
+          message =>
+            message !== original
+        );
 
     if (
       lastUserMessage &&
@@ -53,7 +67,7 @@ export class MockQueryTransformer
       rewrittenQuery: original,
 
       alternativeQueries:
-    generateAlternatives(original),
+        generateAlternatives(original),
     };
   }
 }
@@ -103,3 +117,4 @@ function isFollowUpQuery(
       normalized.includes(pattern)
   );
 }
+
