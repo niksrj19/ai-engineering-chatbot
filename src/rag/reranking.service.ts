@@ -9,7 +9,7 @@ import {
 
 import {
   RAGSearchResult,
-} from "../rag/rag-search.types.js";
+} from "./rag-search.types.js";
 
 export interface RerankingOptions {
   topK: number;

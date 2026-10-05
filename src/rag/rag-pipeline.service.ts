@@ -5,7 +5,7 @@ import {
 
 import {
   RerankingService,
-} from "../services/reranking.service.js";
+} from "./reranking.service.js";
 
 import {
   ContextAssemblyService,
